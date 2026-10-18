@@ -1,0 +1,33 @@
+# Secrets & local config
+.env
+.env.local
+*.env.local
+
+# Dependencies
+node_modules/
+
+# Build output
+backend/dist/
+frontend/.next/
+frontend/next-env.d.ts
+
+# Runtime data
+temp/
+*.log
+bin-src/build/
+bin-src/build2/
+bin-src/dist/
+bin-src/__pycache__/
+bin-src/.pytest_cache/
+bin-src/test_out/
+bin-src/test_scanner_out/
+bin-src/_smoke_out/
+bin/*.bak
+bin/*.exe
+mobile/.expo/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,16 @@
+{
+  "name": "photo-tools",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently --names BE,FE --prefix-colors magenta,cyan \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "build": "npm run build -w backend && npm run build -w frontend",
+    "start": "concurrently --names BE,FE --prefix-colors magenta,cyan \"npm start -w backend\" \"npm start -w frontend\""
+  },
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
