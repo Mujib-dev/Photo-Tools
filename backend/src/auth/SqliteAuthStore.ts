@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { AuthStore, UserRecord } from "./AuthStore.js";
 
 /**
- * SQLite-backed auth store (users + sessions) on Node's built-in node:sqlite.
+ * SQLite-backed auth store (users + sessions + refresh tokens) on Node's built-in node:sqlite.
  */
 export class SqliteAuthStore implements AuthStore {
   readonly kind = "sqlite";
@@ -39,6 +39,14 @@ export class SqliteAuthStore implements AuthStore {
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
       CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+      CREATE TABLE IF NOT EXISTS refresh_tokens (
+        token_hash TEXT PRIMARY KEY,
+        user_id    TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires ON refresh_tokens(expires_at);
     `);
   }
 
@@ -96,6 +104,31 @@ export class SqliteAuthStore implements AuthStore {
 
   async deleteExpiredSessions(now: number): Promise<void> {
     this.conn.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now);
+  }
+
+  async createRefreshToken(tokenHash: string, userId: string, expiresAt: number): Promise<void> {
+    this.conn
+      .prepare("INSERT INTO refresh_tokens (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
+      .run(tokenHash, userId, Date.now(), expiresAt);
+  }
+
+  async getRefreshTokenUser(tokenHash: string, now = Date.now()): Promise<UserRecord | null> {
+    const row = this.conn
+      .prepare(
+        `SELECT u.id, u.email, u.password_hash AS passwordHash, u.created_at AS createdAt
+         FROM refresh_tokens r JOIN users u ON u.id = r.user_id
+         WHERE r.token_hash = ? AND r.expires_at > ?`,
+      )
+      .get(tokenHash, now) as Record<string, unknown> | undefined;
+    return row ? mapUser(row) : null;
+  }
+
+  async deleteRefreshToken(tokenHash: string): Promise<void> {
+    this.conn.prepare("DELETE FROM refresh_tokens WHERE token_hash = ?").run(tokenHash);
+  }
+
+  async deleteExpiredRefreshTokens(now: number): Promise<void> {
+    this.conn.prepare("DELETE FROM refresh_tokens WHERE expires_at <= ?").run(now);
   }
 
   async close(): Promise<void> {

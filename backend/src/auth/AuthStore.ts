@@ -27,6 +27,13 @@ export interface AuthStore {
   getUserBySession(tokenHash: string, now?: number): Promise<UserRecord | null>;
   deleteSession(tokenHash: string): Promise<void>;
   deleteExpiredSessions(now: number): Promise<void>;
+  /** Store a refresh token (hashed) bound to a user. */
+  createRefreshToken(tokenHash: string, userId: string, expiresAt: number): Promise<void>;
+  /** Look up the user for a live (unexpired) refresh token hash, or null. */
+  getRefreshTokenUser(tokenHash: string, now?: number): Promise<UserRecord | null>;
+  /** Revoke a refresh token (called on rotation and logout). */
+  deleteRefreshToken(tokenHash: string): Promise<void>;
+  deleteExpiredRefreshTokens(now: number): Promise<void>;
   close(): Promise<void>;
 }
 

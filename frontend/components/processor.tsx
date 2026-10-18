@@ -21,7 +21,7 @@ import { Dropzone } from "@/components/dropzone";
 import { RegionSelector } from "@/components/region-select";
 import { ZoomControls } from "@/components/zoom-controls";
 import { BeforeAfterSlider } from "@/components/before-after-slider";
-import { downloadAllUrl, downloadUrl, getJob } from "@/lib/api";
+import { downloadAllUrl, downloadUrl, getJob, subscribeJob } from "@/lib/api";
 import type { EnhanceRegion, JobRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useZoomPan } from "@/lib/use-zoom-pan";
@@ -124,6 +124,7 @@ export function Processor({
 
   const jobsRef = React.useRef<FileJob[]>([]);
   const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const eventSourcesRef = React.useRef<Map<string, () => void>>(new Map());
   const runningRef = React.useRef(false);
 
   jobsRef.current = jobs;
@@ -222,6 +223,11 @@ export function Processor({
   }, [mediaKind]);
 
   const removeFile = (key: string) => {
+    const unsub = eventSourcesRef.current.get(key);
+    if (unsub) {
+      unsub();
+      eventSourcesRef.current.delete(key);
+    }
     setJobs((prev) => {
       const target = prev.find((j) => j.key === key);
       if (target) URL.revokeObjectURL(target.previewUrl);
@@ -233,6 +239,8 @@ export function Processor({
 
   const clearAll = () => {
     stopPolling();
+    eventSourcesRef.current.forEach((unsub) => unsub());
+    eventSourcesRef.current.clear();
     setRunningSafe(false);
     setJobs((prev) => {
       prev.forEach((j) => URL.revokeObjectURL(j.previewUrl));
@@ -244,6 +252,8 @@ export function Processor({
   React.useEffect(() => {
     return () => {
       stopPolling();
+      eventSourcesRef.current.forEach((unsub) => unsub());
+      eventSourcesRef.current.clear();
       jobsRef.current.forEach((j) => URL.revokeObjectURL(j.previewUrl));
     };
   }, [stopPolling]);
@@ -272,6 +282,38 @@ export function Processor({
         setJobs((prev) =>
           prev.map((x) => (x.key === job.key ? { ...x, jobId: res.jobId, state: "queued", stage: "Queued" } : x)),
         );
+
+        // Stream real-time updates via Server-Sent Events (SSE)
+        const unsub = subscribeJob(
+          res.jobId,
+          (rec) => {
+            setJobs((prev) =>
+              prev.map((x) =>
+                x.key === job.key
+                  ? {
+                      ...x,
+                      state: rec.state,
+                      stage: rec.stage,
+                      result: rec.state === "completed" ? rec : x.result,
+                      error: rec.error,
+                    }
+                  : x,
+              ),
+            );
+            if (rec.state === "completed" || rec.state === "failed") {
+              eventSourcesRef.current.delete(job.key);
+              const stillActive = jobsRef.current.some(
+                (j) => j.key !== job.key && (j.state === "queued" || j.state === "processing"),
+              );
+              if (!stillActive) setRunningSafe(false);
+            }
+          },
+          () => {
+            // Fall back to polling if SSE connection drops or is blocked
+            startPolling();
+          },
+        );
+        eventSourcesRef.current.set(job.key, unsub);
       } catch (err) {
         setJobs((prev) =>
           prev.map((x) =>
@@ -283,7 +325,6 @@ export function Processor({
         toast.error(err instanceof Error ? err.message : "Upload failed.");
       }
     }
-    startPolling();
   };
 
   const download = (job: FileJob) => {

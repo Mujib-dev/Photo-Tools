@@ -81,6 +81,45 @@ export async function getJob(id: string): Promise<JobRecord> {
   return (await res.json()) as JobRecord;
 }
 
+/**
+ * Stream real-time job updates via Server-Sent Events (SSE).
+ * Returns an unsubscribe function to abort the stream.
+ */
+export function subscribeJob(
+  id: string,
+  onUpdate: (record: JobRecord) => void,
+  onError?: () => void,
+): () => void {
+  if (typeof EventSource === "undefined") {
+    onError?.();
+    return () => {};
+  }
+
+  const url = `/api/backend/jobs/${encodeURIComponent(id)}/events`;
+  const es = new EventSource(url);
+
+  es.onmessage = (event) => {
+    try {
+      const record = JSON.parse(event.data) as JobRecord;
+      onUpdate(record);
+      if (record.state === "completed" || record.state === "failed") {
+        es.close();
+      }
+    } catch {
+      // ignore malformed payloads
+    }
+  };
+
+  es.onerror = () => {
+    es.close();
+    onError?.();
+  };
+
+  return () => {
+    es.close();
+  };
+}
+
 export function downloadUrl(id: string): string {
   return `/api/backend/download/${encodeURIComponent(id)}`;
 }

@@ -21,6 +21,7 @@ import { InProcessQueue } from "./jobs/queue/InProcessQueue.js";
 import { BullQueue } from "./jobs/queue/BullQueue.js";
 import { startCleanupSweeper } from "./storage/TempFileManager.js";
 import { startRateLimitPruner } from "./middleware/rateLimit.js";
+import { startAuthRateLimitPruner } from "./middleware/authRateLimit.js";
 import { buildApp } from "./api/app.js";
 import { SqliteAuthStore } from "./auth/SqliteAuthStore.js";
 import { MemoryAuthStore } from "./auth/MemoryAuthStore.js";
@@ -124,6 +125,7 @@ async function main(): Promise<void> {
 
   const stopCleanup = startCleanupSweeper();
   const stopPruner = startRateLimitPruner();
+  const stopAuthPruner = startAuthRateLimitPruner();
   const recordSweeper = setInterval(() => {
     jobs.sweepExpired().catch(() => undefined);
   }, config.cleanupIntervalMs);
@@ -132,6 +134,7 @@ async function main(): Promise<void> {
   const sessionSweeper = authStore
     ? setInterval(() => {
         authStore?.deleteExpiredSessions(Date.now()).catch(() => undefined);
+        authStore?.deleteExpiredRefreshTokens(Date.now()).catch(() => undefined);
       }, config.cleanupIntervalMs)
     : null;
   if (sessionSweeper) sessionSweeper.unref();
@@ -166,6 +169,7 @@ async function main(): Promise<void> {
     logger.info(`Received ${signal}, shutting down...`);
     stopCleanup();
     stopPruner();
+    stopAuthPruner();
     clearInterval(recordSweeper);
     if (sessionSweeper) clearInterval(sessionSweeper);
     server.close();

@@ -44,7 +44,7 @@ export function buildApp(
         res.setHeader("Access-Control-Allow-Origin", origin);
         res.setHeader("Vary", "Origin");
         res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-        res.setHeader("Access-Control-Allow-Headers", `Content-Type, Authorization, ${config.sessionHeaderName}`);
+        res.setHeader("Access-Control-Allow-Headers", `Content-Type, Authorization, ${config.sessionHeaderName}, ${config.accessTokenHeaderName}`);
         res.setHeader("Access-Control-Allow-Credentials", "true");
         res.setHeader("Access-Control-Max-Age", "600");
       }
@@ -67,8 +67,13 @@ export function buildApp(
   // API key auth (no-op when API_KEYS is unset)
   app.use("/api", apiKeyAuth);
 
-  // User account endpoints (register / login / logout / me).
-  if (authStore) app.use("/api/auth", authRoutes(authStore));
+  // User account endpoints (register / login / refresh / logout / me).
+  // Auth gets the general per-IP limiter first, then the stricter
+  // per-IP+email attempt cap on credential endpoints inside authRoutes.
+  if (authStore) {
+    app.use("/api/auth", rateLimit);
+    app.use("/api/auth", authRoutes(authStore));
+  }
 
   // Processing endpoints require a signed-in session when accounts are enabled.
   if (authStore && config.authEnabled) {

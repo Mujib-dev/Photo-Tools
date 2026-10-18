@@ -113,6 +113,46 @@ export function jobsRoutes(jobs: JobManager): Router {
     }
   });
 
+  router.get("/jobs/:id/events", async (req, res, next) => {
+    try {
+      const jobId = req.params.id;
+      const initial = await jobs.get(jobId);
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders?.();
+
+      res.write(`data: ${JSON.stringify(toPublicRecord(initial))}\n\n`);
+
+      if (initial.state === "completed" || initial.state === "failed") {
+        res.end();
+        return;
+      }
+
+      const onUpdate = (updated: JobRecord) => {
+        try {
+          res.write(`data: ${JSON.stringify(toPublicRecord(updated))}\n\n`);
+          if (updated.state === "completed" || updated.state === "failed") {
+            jobs.off(`job:${jobId}`, onUpdate);
+            res.end();
+          }
+        } catch {
+          jobs.off(`job:${jobId}`, onUpdate);
+        }
+      };
+
+      jobs.on(`job:${jobId}`, onUpdate);
+
+      req.on("close", () => {
+        jobs.off(`job:${jobId}`, onUpdate);
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.get("/download/:id", async (req, res, next) => {
     try {
       const record = await jobs.get(req.params.id);

@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -28,7 +29,7 @@ function friendlyError(err: unknown): string {
   return "Unable to process the image.";
 }
 
-export class JobManager {
+export class JobManager extends EventEmitter {
   private services: Record<JobOperation, ProcessingService>;
   private progressAt = new Map<string, { pct: number; ts: number }>();
 
@@ -37,7 +38,16 @@ export class JobManager {
     private readonly queue: QueueProvider,
     services: Record<JobOperation, ProcessingService>,
   ) {
+    super();
     this.services = services;
+  }
+
+  async updateAndEmit(jobId: string, patch: Partial<JobRecord>): Promise<void> {
+    await this.store.update(jobId, patch);
+    const updated = await this.store.get(jobId);
+    if (updated) {
+      this.emit(`job:${jobId}`, updated);
+    }
   }
 
   async init(): Promise<void> {
@@ -86,7 +96,7 @@ export class JobManager {
   private async process(payload: JobPayload): Promise<void> {
     const { jobId, operation } = payload;
     try {
-      await this.store.update(jobId, { state: "processing", stage: "Processing…" });
+      await this.updateAndEmit(jobId, { state: "processing", stage: "Processing…" });
       const service = this.services[operation];
       const result = await service.process({
         inputPath: payload.inputPath,
@@ -99,7 +109,7 @@ export class JobManager {
       const info = await stat(result.outputPath);
       const outputFormat = path.extname(result.outputPath).replace(".", "").toLowerCase();
 
-      await this.store.update(jobId, {
+      await this.updateAndEmit(jobId, {
         state: "completed",
         stage: "Completed",
         outputFilename: path.basename(result.outputPath),
@@ -111,7 +121,7 @@ export class JobManager {
     } catch (err) {
       const safe = friendlyError(err);
       logger.error(`Job ${jobId} failed`, { operation, error: err instanceof Error ? err.message : String(err) });
-      await this.store.update(jobId, { state: "failed", stage: "Failed", error: safe });
+      await this.updateAndEmit(jobId, { state: "failed", stage: "Failed", error: safe });
     } finally {
       this.progressAt.delete(jobId);
     }
@@ -126,8 +136,7 @@ export class JobManager {
     if (last && last.pct === pct) return;
     if (last && now - last.ts < 750 && pct - last.pct < 3) return;
     this.progressAt.set(jobId, { pct, ts: now });
-    void this.store
-      .update(jobId, { stage: `Processing… ${pct}%` })
+    void this.updateAndEmit(jobId, { stage: `Processing… ${pct}%` })
       .catch(() => undefined);
   }
 

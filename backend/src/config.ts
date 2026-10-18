@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 
 import { logger } from "./utils/logger.js";
 
@@ -12,6 +13,22 @@ loadEnv({ path: path.resolve(__dirname, "../../.env") });
 loadEnv({ path: path.resolve(__dirname, "../../.env.local") });
 
 const env = process.env as Record<string, string | undefined>;
+
+/**
+ * Secret used to sign access + refresh JWTs. In production a missing secret is
+ * fatal-ish: one is generated per boot (logged loudly), which invalidates
+ * previously issued tokens whenever the process restarts. Set JWT_SECRET to
+ * keep sessions stable across restarts.
+ */
+const jwtSecret = (env.JWT_SECRET ?? "").trim() || (() => {
+  if ((env.NODE_ENV ?? "development") === "production") {
+    logger.warn(
+      "JWT_SECRET is not set — generating a random secret. Issued tokens will be invalidated on every restart. Set JWT_SECRET in .env.",
+    );
+    return randomBytes(32).toString("hex");
+  }
+  return "photo-tools-dev-only-jwt-secret";
+})();
 
 function int(name: string, fallback: number): number {
   const raw = env[name];
@@ -109,6 +126,21 @@ export const config = {
   // the session token returned by the /api/auth/token endpoints.
   sessionHeaderName: (env.SESSION_HEADER_NAME ?? "x-session-token").toLowerCase(),
   sessionTtlMs: int("SESSION_TTL_DAYS", 7) * 24 * 60 * 60 * 1000,
+
+  // JWT access + refresh tokens. The access token authenticates every request
+  // (short-lived); the refresh token is rotated on every use and revocable
+  // server-side. Legacy opaque sessions above stay valid until they expire.
+  jwtSecret,
+  accessTokenTtlMs: int("ACCESS_TOKEN_TTL_MINUTES", 15) * 60 * 1000,
+  refreshTokenTtlMs: int("REFRESH_TOKEN_TTL_DAYS", 7) * 24 * 60 * 60 * 1000,
+  accessCookieName: env.ACCESS_COOKIE_NAME ?? "pictools_access",
+  refreshCookieName: env.REFRESH_COOKIE_NAME ?? "pictools_refresh",
+  accessTokenHeaderName: (env.ACCESS_TOKEN_HEADER_NAME ?? "x-access-token").toLowerCase(),
+
+  // Login/register throttling: strict per-IP+email cap, a looser per-IP cap
+  // for shared addresses, both over a sliding window.
+  authRateLimitWindowMs: int("AUTH_RATE_LIMIT_WINDOW_SECONDS", 900) * 1000,
+  authRateLimitMax: int("AUTH_RATE_LIMIT_MAX_ATTEMPTS", 5),
 
   // Default demo account, seeded on first startup when absent.
   defaultUserEmail: (env.DEFAULT_USER_EMAIL ?? "demo@pic.tools").trim().toLowerCase(),
