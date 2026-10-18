@@ -24,6 +24,7 @@ bin-src/test_scanner_out/
 bin-src/_smoke_out/
 bin/*.bak
 bin/*.exe
+*.tsbuildinfo
 mobile/.expo/
 
 # OS / editor

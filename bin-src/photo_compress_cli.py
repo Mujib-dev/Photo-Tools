@@ -35,9 +35,17 @@ TARGET_MIN_KB = 10
 TARGET_MAX_KB = 20000
 
 
-def load_rgb(path):
+def load_image(path, fmt):
     img = Image.open(path)
     img = ImageOps.exif_transpose(img)
+    has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+    if fmt == "webp" and has_alpha:
+        return img.convert("RGBA")
+    if has_alpha:
+        bg = Image.new("RGB", img.size, (255, 255, 255))
+        alpha_img = img.convert("RGBA")
+        bg.paste(alpha_img, mask=alpha_img.split()[3])
+        return bg
     return img.convert("RGB")
 
 
@@ -70,7 +78,7 @@ def compress(input_path, output_base, target_kb, requested_fmt="keep"):
         raise ValueError("target-kb must be between %d and %d" % (TARGET_MIN_KB, TARGET_MAX_KB))
 
     fmt = pick_format(requested_fmt, input_path)
-    img = load_rgb(input_path)
+    img = load_image(input_path, fmt)
     target_bytes = target_kb * 1024
 
     # Binary search for the highest quality that fits the budget.

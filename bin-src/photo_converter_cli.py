@@ -27,7 +27,7 @@ import os
 import sys
 import argparse
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 # ---------------------------------------------------------------------------
 # Shared processing core (same engine as the original app)
@@ -64,7 +64,8 @@ def image_to_fullsize_ico(input_path, output_path, sizes=None):
     if not sizes:
         raise ValueError("at least one positive ICO size is required")
 
-    img = Image.open(input_path).convert("RGBA")
+    img = Image.open(input_path)
+    img = ImageOps.exif_transpose(img).convert("RGBA")
     width, height = img.size
     min_side = min(width, height)
 
@@ -89,9 +90,16 @@ def convert_to_format(input_path, output_path, out_format):
     """Straight format conversion, preserving original dimensions and aspect."""
     pil_format = PIL_FORMATS[out_format]
     img = Image.open(input_path)
+    img = ImageOps.exif_transpose(img)
     if out_format in ("jpg", "jpeg", "bmp", "tiff", "gif"):
-        # JPEG, BMP, TIFF and GIF have no alpha channel -> flatten onto white.
-        img = img.convert("RGB")
+        # JPEG, BMP, TIFF and GIF have no alpha channel -> flatten cleanly onto white canvas
+        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            alpha_img = img.convert("RGBA")
+            bg.paste(alpha_img, mask=alpha_img.split()[3])
+            img = bg
+        else:
+            img = img.convert("RGB")
     else:
         img = img.convert("RGBA")
     img.save(output_path, format=pil_format)

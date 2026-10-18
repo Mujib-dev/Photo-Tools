@@ -45,8 +45,9 @@ export class ExeProcessRunner {
     if (!exePath) {
       return Promise.reject(new Error(`Refusing to execute unknown operation "${operation}".`));
     }
-    if (!existsSync(exePath) || !exePath.toLowerCase().endsWith(".exe")) {
-      return Promise.reject(new Error(`Executable for "${operation}" is not a valid .exe path.`));
+    const isWindows = process.platform === "win32";
+    if (!existsSync(exePath) || (isWindows && !exePath.toLowerCase().endsWith(".exe"))) {
+      return Promise.reject(new Error(`Executable for "${operation}" is not a valid executable path.`));
     }
 
     return new Promise<RunResult>((resolve) => {
@@ -67,13 +68,21 @@ export class ExeProcessRunner {
       });
 
       const killTree = (): void => {
-        // On Windows, kill the entire child process tree (PyInstaller onefile
-        // spawns a grandchild process that must not be orphaned).
-        const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-          windowsHide: true,
-          stdio: "ignore",
-        });
-        killer.unref();
+        if (isWindows) {
+          // On Windows, kill the entire child process tree (PyInstaller onefile
+          // spawns a grandchild process that must not be orphaned).
+          const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+            windowsHide: true,
+            stdio: "ignore",
+          });
+          killer.unref();
+        } else {
+          try {
+            process.kill(-child.pid!, "SIGKILL");
+          } catch {
+            child.kill("SIGKILL");
+          }
+        }
       };
 
       const timeout = setTimeout(() => {

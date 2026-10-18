@@ -239,10 +239,15 @@ export const RESIZE_PRESETS: {
   height: number;
   dpi: number;
 }[] = [
-  { id: "passport", label: "Passport", mode: "cm", width: 3.5, height: 4.5, dpi: 300 },
-  { id: "visa", label: "Visa", mode: "cm", width: 3.0, height: 4.0, dpi: 300 },
-  { id: "email", label: "Email / Avatar", mode: "px", width: 180, height: 180, dpi: 72 },
-  { id: "linkedin", label: "LinkedIn / CV", mode: "px", width: 400, height: 400, dpi: 72 },
+  { id: "passport", label: "Passport (3.5 × 4.5 cm)", mode: "cm", width: 3.5, height: 4.5, dpi: 300 },
+  { id: "visa", label: "Visa (3 × 4 cm)", mode: "cm", width: 3.0, height: 4.0, dpi: 300 },
+  { id: "us-passport", label: "US Passport (2 × 2 in / 5.1 × 5.1 cm)", mode: "cm", width: 5.08, height: 5.08, dpi: 300 },
+  { id: "email", label: "Avatar / Icon (180 × 180)", mode: "px", width: 180, height: 180, dpi: 72 },
+  { id: "linkedin", label: "Profile / Headshot (400 × 400)", mode: "px", width: 400, height: 400, dpi: 72 },
+  { id: "ig-square", label: "Instagram Square (1080 × 1080)", mode: "px", width: 1080, height: 1080, dpi: 72 },
+  { id: "ig-portrait", label: "Instagram Portrait (1080 × 1350)", mode: "px", width: 1080, height: 1350, dpi: 72 },
+  { id: "yt-thumb", label: "YouTube Thumbnail (1280 × 720)", mode: "px", width: 1280, height: 720, dpi: 72 },
+  { id: "story", label: "Story / TikTok (1080 × 1920)", mode: "px", width: 1080, height: 1920, dpi: 72 },
   { id: "custom", label: "Custom", mode: "px", width: 640, height: 640, dpi: 96 },
 ];
 

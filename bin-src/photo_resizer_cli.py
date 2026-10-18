@@ -25,7 +25,7 @@ import os
 import sys
 import argparse
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 # ---------------------------------------------------------------------------
@@ -44,8 +44,20 @@ def compute_target_size(mode, width, height, dpi):
 
 
 def process_image(input_path, output_path, width_px, height_px, dpi):
-    """Original core: open -> RGB -> resize LANCZOS -> save with dpi metadata."""
-    img = Image.open(input_path).convert("RGB")
+    """Core: open -> EXIF orientation -> preserve alpha / composite -> resize LANCZOS -> save with dpi metadata."""
+    img = Image.open(input_path)
+    img = ImageOps.exif_transpose(img)
+    ext = os.path.splitext(output_path)[1].lower()
+    if ext in (".png", ".webp") and (img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)):
+        img = img.convert("RGBA")
+    else:
+        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            alpha_img = img.convert("RGBA")
+            bg.paste(alpha_img, mask=alpha_img.split()[3])
+            img = bg
+        else:
+            img = img.convert("RGB")
     resized = img.resize((width_px, height_px), Image.LANCZOS)
     resized.save(output_path, dpi=(dpi, dpi))
     return resized
