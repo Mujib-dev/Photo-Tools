@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Dropzone } from "@/components/dropzone";
 import { RegionSelector } from "@/components/region-select";
 import { ZoomControls } from "@/components/zoom-controls";
+import { BeforeAfterSlider } from "@/components/before-after-slider";
 import { downloadAllUrl, downloadUrl, getJob } from "@/lib/api";
 import type { EnhanceRegion, JobRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -117,6 +118,7 @@ export function Processor({
   const [jobs, setJobs] = React.useState<FileJob[]>([]);
   const [running, setRunning] = React.useState(false);
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
+  const [viewMode, setViewMode] = React.useState<"split" | "after" | "before">("split");
   const hiddenInputRef = React.useRef<HTMLInputElement>(null);
   const previewImgRef = React.useRef<HTMLImageElement | null>(null);
 
@@ -346,6 +348,48 @@ export function Processor({
           <div className="relative flex min-h-[240px] flex-1 flex-col overflow-hidden rounded-2xl border border-outline-variant/10 bg-surface-container-lowest shadow-[0_4px_12px_rgba(0,0,0,0.03)] sm:min-h-[380px]">
             {selected ? (
               <div className="group relative flex flex-1 items-center justify-center bg-canvas p-4">
+                {/* View mode toggle for completed results */}
+                {selected.state === "completed" && selected.result && mediaKind !== "video" && (
+                  <div className="absolute left-4 top-4 z-10 flex items-center gap-1 rounded-lg border border-outline-variant/20 bg-background/90 p-1 backdrop-blur-md shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => setViewMode("split")}
+                      className={cn(
+                        "rounded-md px-2.5 py-1 font-display text-xs font-semibold transition-colors",
+                        viewMode === "split"
+                          ? "bg-primary text-on-primary shadow-xs"
+                          : "text-on-surface-variant hover:text-foreground",
+                      )}
+                    >
+                      Split View
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode("after")}
+                      className={cn(
+                        "rounded-md px-2.5 py-1 font-display text-xs font-semibold transition-colors",
+                        viewMode === "after"
+                          ? "bg-primary text-on-primary shadow-xs"
+                          : "text-on-surface-variant hover:text-foreground",
+                      )}
+                    >
+                      Result
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode("before")}
+                      className={cn(
+                        "rounded-md px-2.5 py-1 font-display text-xs font-semibold transition-colors",
+                        viewMode === "before"
+                          ? "bg-primary text-on-primary shadow-xs"
+                          : "text-on-surface-variant hover:text-foreground",
+                      )}
+                    >
+                      Original
+                    </button>
+                  </div>
+                )}
+
                 {/* Overlay toolbar */}
                 <div className="glass-panel absolute right-4 top-4 z-10 flex gap-1 rounded-lg border border-outline-variant/10 p-1 opacity-100 shadow-[0_12px_32px_rgba(0,0,0,0.2)] transition-opacity duration-300 focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
                   <button
@@ -378,16 +422,30 @@ export function Processor({
                 >
                   {mediaKind === "video" ? (
                     <video
-                      src={selected.previewUrl}
+                      src={
+                        selected.state === "completed" && selected.result
+                          ? downloadUrl(selected.result.id)
+                          : selected.previewUrl
+                      }
                       controls
                       playsInline
                       className="h-auto max-h-[420px] w-auto max-w-full rounded-md object-contain"
+                    />
+                  ) : selected.state === "completed" && selected.result && viewMode === "split" ? (
+                    <BeforeAfterSlider
+                      beforeUrl={selected.previewUrl}
+                      afterUrl={downloadUrl(selected.result.id)}
+                      style={zoomable ? zoomPan.contentStyle : undefined}
                     />
                   ) : (
                     /* eslint-disable-next-line @next/next/no-img-element */
                     <img
                       ref={previewImgRef}
-                      src={selected.previewUrl}
+                      src={
+                        selected.state === "completed" && selected.result && viewMode === "after"
+                          ? downloadUrl(selected.result.id)
+                          : selected.previewUrl
+                      }
                       alt={selected.file.name}
                       style={zoomable ? zoomPan.contentStyle : undefined}
                       className="h-auto max-h-[420px] w-auto max-w-full rounded-md object-contain"
