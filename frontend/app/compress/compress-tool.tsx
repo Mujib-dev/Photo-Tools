@@ -22,6 +22,7 @@ export function CompressTool() {
         description="Hit an exact size limit — set a target in KB and the engine finds the highest quality that fits. Ideal for form uploads."
         submit={(file, s) => submitCompress(file, s as CompressSettings)}
         settings={settings}
+        setSettings={(s) => setSettings(s as CompressSettings)}
         settingsPanel={() => <CompressSettingsForm value={settings} onChange={setSettings} />}
       />
     </AuthGate>

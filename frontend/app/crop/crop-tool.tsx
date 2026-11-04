@@ -12,7 +12,9 @@ import {
   RefreshCcw,
   RotateCcw,
   RotateCw,
+  Share2,
   ShieldCheck,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,6 +30,7 @@ import {
   OUTPUT_FORMATS,
   baseName,
   canvasToBlob,
+  computeRuleOfThirdsCrop,
   cropCanvas,
   fitAspectRect,
   getOutputFormat,
@@ -41,6 +44,8 @@ import {
 } from "@/lib/image-edit";
 import { createZip } from "@/lib/zip";
 import { formatBytes, formatPixels } from "@/lib/format";
+import { detectImageSaliency } from "@/lib/saliency";
+import { isShareSupported, shareBlob } from "@/lib/share";
 import { cn } from "@/lib/utils";
 
 interface CropResult {
@@ -217,6 +222,34 @@ export function CropTool() {
     setResetNonce((n) => n + 1);
   };
 
+  const handleAutoReframe = () => {
+    if (!selected) return;
+    const img = imgCache.current.get(selected.key);
+    const { width: tw, height: th } = transformedSize(selected.width, selected.height, selected.transform);
+    const ratio = presetAspect(aspect, tw, th);
+
+    let focalX = 0.5;
+    let focalY = 0.42;
+    let detectedInfo = "Rule-of-Thirds power points";
+
+    if (img) {
+      try {
+        const tempCanvas = renderTransformed(img, selected.transform, 800);
+        const saliency = detectImageSaliency(tempCanvas, tw, th);
+        focalX = saliency.x;
+        focalY = saliency.y;
+        detectedInfo = `${saliency.subjectType} at ${saliency.powerPointLabel}`;
+      } catch {
+        // Fallback to center bias
+      }
+    }
+
+    const newCrop = computeRuleOfThirdsCrop(tw, th, ratio, focalX, focalY);
+    updateCrop(selected.key, newCrop);
+    setResetNonce((n) => n + 1);
+    toast.success(`AI Auto-Framed: ${detectedInfo}!`);
+  };
+
   const resetAll = () => {
     if (!selected) return;
     setItems((prev) =>
@@ -268,6 +301,21 @@ export function CropTool() {
     } finally {
       setApplying(false);
     }
+  };
+
+  const [shareSupported, setShareSupported] = React.useState(false);
+  React.useEffect(() => {
+    setShareSupported(isShareSupported());
+  }, []);
+
+  const shareItem = async (item: CropItem) => {
+    if (!item.result) return;
+    const filename = `${baseName(item.file.name)}-cropped.${item.result.ext}`;
+    const shared = await shareBlob(item.result.blob, filename, {
+      title: filename,
+      text: "Cropped with PicTools",
+    });
+    if (shared) toast.success("Shared successfully!");
   };
 
   const download = (item: CropItem) => {
@@ -482,24 +530,40 @@ export function CropTool() {
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                       {item.result && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="gap-1.5 px-2.5"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            download(item);
-                          }}
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          <span className="hidden sm:inline">Download</span>
-                        </Button>
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 px-2.5"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              download(item);
+                            }}
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Download</span>
+                          </Button>
+                          {shareSupported && (
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              title="Share"
+                              className="h-8 w-8 text-on-surface-variant hover:text-foreground"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void shareItem(item);
+                              }}
+                            >
+                              <Share2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </>
                       )}
                       <Button
                         size="icon"
                         variant="ghost"
                         aria-label={`Remove ${item.file.name}`}
-                        className="h-8 w-8"
+                        className="h-10 w-10"
                         onClick={(e) => {
                           e.stopPropagation();
                           removeItem(item.key);
@@ -563,6 +627,34 @@ export function CropTool() {
                     Flip V
                   </button>
                 </div>
+              </div>
+
+              {/* AI Rule-of-Thirds Auto-Reframe */}
+              <div className="rounded-xl border border-purple-500/30 bg-purple-500/5 p-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="h-4 w-4 text-purple-500" />
+                    <span className="font-display text-xs font-semibold text-foreground">
+                      AI Rule-of-Thirds Reframe
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-semibold text-purple-600 dark:text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-500/30">
+                    Pro Composition
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Frames the subject automatically at compositional power points using classic photography rules.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!selected}
+                  onClick={handleAutoReframe}
+                  className="w-full h-8 text-xs gap-1.5 bg-purple-600 hover:bg-purple-700 text-white font-medium"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Auto-Reframe Subject
+                </Button>
               </div>
 
               <div className="space-y-2">

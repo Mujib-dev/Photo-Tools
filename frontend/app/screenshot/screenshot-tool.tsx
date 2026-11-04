@@ -111,7 +111,7 @@ function CaptureRow({
             e.stopPropagation();
             onDownload();
           }}
-          className="flex h-9 w-9 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary"
+          className="flex h-10 w-10 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary"
         >
           <Download className="h-4 w-4" />
         </button>
@@ -123,7 +123,7 @@ function CaptureRow({
             e.stopPropagation();
             onMove(-1);
           }}
-          className="flex h-8 w-8 items-center justify-center rounded text-on-surface-variant hover:bg-surface-container-high disabled:opacity-30"
+          className="flex h-10 w-10 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:opacity-30"
         >
           <ArrowUp className="h-3.5 w-3.5" />
         </button>
@@ -135,7 +135,7 @@ function CaptureRow({
             e.stopPropagation();
             onMove(1);
           }}
-          className="flex h-8 w-8 items-center justify-center rounded text-on-surface-variant hover:bg-surface-container-high disabled:opacity-30"
+          className="flex h-10 w-10 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:opacity-30"
         >
           <ArrowDown className="h-3.5 w-3.5" />
         </button>
@@ -146,7 +146,7 @@ function CaptureRow({
             e.stopPropagation();
             onRemove();
           }}
-          className="flex h-9 w-9 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-destructive"
+          className="flex h-10 w-10 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-destructive"
         >
           <Trash2 className="h-4 w-4" />
         </button>

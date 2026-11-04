@@ -29,6 +29,7 @@ export function EnhanceTool() {
         description="Enhance your photos with one click — or fine-tune sharpness, contrast, color, denoise and upscaling by hand. Drag a box on the preview to enhance just that area."
         submit={(file, s) => submitEnhance(file, s as EnhanceSettings)}
         settings={settings}
+        setSettings={(s) => setSettings(s as EnhanceSettings)}
         settingsPanel={() => <EnhanceSettingsForm value={settings} onChange={setSettings} />}
         regionSelection={{
           value: settings.region ?? null,

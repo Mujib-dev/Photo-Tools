@@ -2,9 +2,10 @@ import type { NextFunction, Request, Response } from "express";
 
 import { config } from "../config.js";
 import { hashSessionToken } from "../auth/session.js";
+import { looksLikeApiKey } from "../auth/apiKeys.js";
 import { verifyAccessToken } from "../auth/jwt.js";
-import { toPublicUser, type AuthStore, type PublicUser } from "../auth/AuthStore.js";
-import { Errors } from "../utils/errors.js";
+import { isAdminRole, toPublicUser, type AuthStore, type PublicUser } from "../auth/AuthStore.js";
+import { AppError, Errors } from "../utils/errors.js";
 
 declare module "express-serve-static-core" {
   interface Request {
@@ -58,12 +59,28 @@ export interface AuthResolution {
   user: PublicUser;
   /** Access-token expiry (ms since epoch), or null for legacy sessions. */
   expiresAt: number | null;
+  /** The mechanism through which the caller authenticated. */
+  method: "access_token" | "api_key" | "session";
 }
 
 /**
- * Resolve the signed-in user from a verified access JWT first, falling back
- * to a legacy opaque session so tokens issued before the JWT rollout keep
- * working until they expire.
+ * Personal API key: the token is presented as `Authorization: Bearer ptk_…`.
+ * The value returned is the raw token (never the shared `API_KEYS` secret).
+ */
+export function getApiKeyToken(req: Request): string | null {
+  const header = req.headers.authorization;
+  const raw = Array.isArray(header) ? header[0] : header;
+  if (!raw) return null;
+  const [scheme, token] = raw.split(" ");
+  if (scheme !== "Bearer" || !token) return null;
+  const trimmed = token.trim();
+  return looksLikeApiKey(trimmed) ? trimmed : null;
+}
+
+/**
+ * Resolve the signed-in user from a verified access JWT first, then from a
+ * personal API key, and finally from a legacy opaque session so tokens issued
+ * before the JWT rollout keep working until they expire.
  */
 export async function resolveAuth(req: Request, authStore: AuthStore): Promise<AuthResolution | null> {
   const access = getAccessToken(req);
@@ -71,15 +88,27 @@ export async function resolveAuth(req: Request, authStore: AuthStore): Promise<A
     const claims = verifyAccessToken(access);
     if (claims) {
       const user = await authStore.getUserById(claims.sub);
-      if (user) return { user: toPublicUser(user), expiresAt: claims.exp * 1000 };
+      if (user) return { user: toPublicUser(user), expiresAt: claims.exp * 1000, method: "access_token" };
     }
     // An expired/invalid access token falls through: a legacy session may
     // still be present for users who signed in before the JWT rollout.
   }
+  const apiKey = getApiKeyToken(req);
+  if (apiKey) {
+    const key = await authStore.getApiKeyByHash(hashSessionToken(apiKey));
+    if (key) {
+      const user = await authStore.getUserById(key.userId);
+      if (user) {
+        // Best-effort usage stamp; never blocks or fails the request.
+        void authStore.touchApiKey(key.id, Date.now()).catch(() => undefined);
+        return { user: toPublicUser(user), expiresAt: null, method: "api_key" };
+      }
+    }
+  }
   const session = getSessionToken(req);
   if (session) {
     const user = await authStore.getUserBySession(hashSessionToken(session));
-    if (user) return { user: toPublicUser(user), expiresAt: null };
+    if (user) return { user: toPublicUser(user), expiresAt: null, method: "session" };
   }
   return null;
 }
@@ -98,6 +127,83 @@ export function requireAuth(authStore: AuthStore) {
       const resolved = await resolveAuth(req, authStore);
       if (!resolved) {
         next(Errors.unauthorized());
+        return;
+      }
+      if (resolved.user.status === "banned" || resolved.user.status === "suspended") {
+        next(
+          new AppError(
+            403,
+            `Your account has been ${resolved.user.status}${resolved.user.banReason ? `: ${resolved.user.banReason}` : "."}`,
+          ),
+        );
+        return;
+      }
+      req.authUser = resolved.user;
+      next();
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+/**
+ * Best-effort authentication: attaches `req.authUser` if the caller presents a
+ * valid access token, API key, or session, but lets guest callers pass through
+ * so public/standard utilities (like resize, convert, compress) can execute.
+ */
+export function attachAuth(authStore: AuthStore) {
+  return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+    try {
+      if (!config.authEnabled) {
+        next();
+        return;
+      }
+      const resolved = await resolveAuth(req, authStore);
+      if (resolved && resolved.user.status !== "banned" && resolved.user.status !== "suspended") {
+        req.authUser = resolved.user;
+      }
+      next();
+    } catch {
+      next();
+    }
+  };
+}
+
+/**
+ * Require an administrator. Resolves the live user (so a role change takes
+ * effect immediately, without waiting for the access token to expire) and
+ * rejects everyone else with 403.
+ *
+ * Enforces security invariant: Personal API keys are strictly rejected on
+ * admin endpoints (mitigating key leak / privilege escalation attacks).
+ */
+export function requireAdmin(authStore: AuthStore) {
+  return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+    try {
+      if (!config.authEnabled) {
+        next(new AppError(403, "Administrator access is unavailable while authentication is disabled."));
+        return;
+      }
+      const resolved = await resolveAuth(req, authStore);
+      if (!resolved) {
+        next(Errors.unauthorized());
+        return;
+      }
+      if (resolved.method === "api_key") {
+        next(
+          new AppError(
+            403,
+            "API keys cannot be used to access administrative endpoints. Use an interactive administrator session.",
+          ),
+        );
+        return;
+      }
+      if (resolved.user.status === "banned" || resolved.user.status === "suspended") {
+        next(new AppError(403, `This administrator account has been ${resolved.user.status}. Access denied.`));
+        return;
+      }
+      if (!isAdminRole(resolved.user.role)) {
+        next(new AppError(403, "Administrator access required."));
         return;
       }
       req.authUser = resolved.user;

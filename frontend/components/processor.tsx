@@ -8,8 +8,10 @@ import {
   Film,
   ImageIcon,
   Loader2,
+  Music,
   Plus,
   RefreshCcw,
+  Share2,
   Trash2,
   Upload,
   XCircle,
@@ -18,14 +20,19 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Dropzone } from "@/components/dropzone";
+import { PresetBar } from "@/components/preset-bar";
+import { ToolHint } from "@/components/tool-hint";
 import { RegionSelector } from "@/components/region-select";
 import { ZoomControls } from "@/components/zoom-controls";
 import { BeforeAfterSlider } from "@/components/before-after-slider";
 import { downloadAllUrl, downloadUrl, getJob, subscribeJob } from "@/lib/api";
+import { fetchCreditsCached } from "@/lib/credits";
 import type { EnhanceRegion, JobRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useZoomPan } from "@/lib/use-zoom-pan";
 import { formatBytes, formatFormat, formatPixels } from "@/lib/format";
+import { isHeicFile, createPreviewUrl } from "@/lib/heic";
+import { isShareSupported, shareFromUrl } from "@/lib/share";
 
 export type JobUiState = "pending" | "queued" | "processing" | "completed" | "failed" | "downloaded";
 
@@ -43,14 +50,16 @@ export interface FileJob {
   result: JobRecord | null;
 }
 
-type MediaKind = "image" | "video";
+type MediaKind = "image" | "video" | "audio";
 
 interface ProcessorProps {
-  operation: "resize" | "convert" | "enhance" | "removebg" | "compress" | "watermark" | "video";
+  operation: "resize" | "convert" | "enhance" | "removebg" | "compress" | "watermark" | "video" | "audio";
   title: string;
   description: string;
   submit: (file: File, settings: unknown) => Promise<{ jobId: string }>;
   settings: unknown;
+  /** Replace the tool's settings (used to apply a saved preset). */
+  setSettings?: (settings: unknown) => void;
   settingsPanel: (meta: { count: number; running: boolean; duration: number }) => React.ReactNode;
   /** Which media the tool accepts and previews. Defaults to images. */
   mediaKind?: MediaKind;
@@ -64,10 +73,22 @@ interface ProcessorProps {
 function readMediaMeta(
   file: File,
   kind: MediaKind,
+  customUrl?: string,
 ): Promise<{ width: number; height: number; duration: number }> {
   return new Promise((resolve) => {
-    const url = URL.createObjectURL(file);
-    if (kind === "video") {
+    const url = customUrl || URL.createObjectURL(file);
+    if (kind === "audio") {
+      const audio = document.createElement("audio");
+      audio.preload = "metadata";
+      audio.onloadedmetadata = () =>
+        resolve({
+          width: 0,
+          height: 0,
+          duration: Number.isFinite(audio.duration) ? audio.duration : 0,
+        });
+      audio.onerror = () => resolve({ width: 0, height: 0, duration: 0 });
+      audio.src = url;
+    } else if (kind === "video") {
       const video = document.createElement("video");
       video.preload = "metadata";
       video.onloadedmetadata = () =>
@@ -84,7 +105,9 @@ function readMediaMeta(
       img.onerror = () => resolve({ width: 0, height: 0, duration: 0 });
       img.src = url;
     }
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    if (!customUrl) {
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }
   });
 }
 
@@ -98,6 +121,7 @@ const OPERATION_LABELS: Record<ProcessorProps["operation"], { done: string; pane
   compress: { done: "compressed", panel: "Compress Settings", button: "Compress Images" },
   watermark: { done: "watermarked", panel: "Watermark Settings", button: "Add Watermark" },
   video: { done: "processed", panel: "Video Settings", button: "Export Video" },
+  audio: { done: "converted", panel: "Audio Settings", button: "Convert Audio" },
 };
 
 export function Processor({
@@ -106,14 +130,15 @@ export function Processor({
   description,
   submit,
   settings,
+  setSettings,
   settingsPanel,
   mediaKind = "image",
   regionSelection,
 }: ProcessorProps) {
-  const MediaIcon = mediaKind === "video" ? Film : ImageIcon;
-  const mediaNoun = mediaKind === "video" ? "video" : "image";
-  const mediaNounPlural = mediaKind === "video" ? "videos" : "images";
-  const accept = mediaKind === "video" ? "video/*" : "image/*";
+  const MediaIcon = mediaKind === "video" ? Film : mediaKind === "audio" ? Music : ImageIcon;
+  const mediaNoun = mediaKind === "video" ? "video" : mediaKind === "audio" ? "audio track" : "image";
+  const mediaNounPlural = mediaKind === "video" ? "videos" : mediaKind === "audio" ? "audio tracks" : "images";
+  const accept = mediaKind === "video" ? "video/*" : mediaKind === "audio" ? "audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.wma,.webm" : "image/*,.heic,.heif";
 
   const [jobs, setJobs] = React.useState<FileJob[]>([]);
   const [running, setRunning] = React.useState(false);
@@ -173,6 +198,22 @@ export function Processor({
           if (r.error) return { ...j, state: "failed", error: r.error };
           const rec = r.record as JobRecord;
           if (rec.state === "completed") {
+            if (operation === "video" && jobsRef.current.length === 1 && j.state !== "completed") {
+              try {
+                const a = document.createElement("a");
+                a.href = downloadUrl(rec.id);
+                if (rec.outputFilename) a.download = rec.outputFilename;
+                a.style.display = "none";
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                  if (document.body.contains(a)) document.body.removeChild(a);
+                }, 1000);
+                toast.success("Video ready! Saving directly to your device.");
+              } catch {
+                window.location.href = downloadUrl(rec.id);
+              }
+            }
             return { ...j, state: "completed", stage: "Completed", result: rec };
           }
           if (rec.state === "failed") {
@@ -216,9 +257,13 @@ export function Processor({
     });
 
     for (const f of added) {
-      void readMediaMeta(f, mediaKind).then((meta) =>
-        setJobs((prev) => prev.map((j) => (j.file === f ? { ...j, ...meta } : j))),
-      );
+      void (async () => {
+        const previewUrl = await createPreviewUrl(f);
+        const meta = await readMediaMeta(f, mediaKind, previewUrl);
+        setJobs((prev) =>
+          prev.map((j) => (j.file === f ? { ...j, previewUrl, ...meta } : j)),
+        );
+      })();
     }
   }, [mediaKind]);
 
@@ -254,9 +299,23 @@ export function Processor({
       stopPolling();
       eventSourcesRef.current.forEach((unsub) => unsub());
       eventSourcesRef.current.clear();
-      jobsRef.current.forEach((j) => URL.revokeObjectURL(j.previewUrl));
     };
   }, [stopPolling]);
+
+  const handlePreviewError = React.useCallback((key: string) => {
+    setJobs((prev) =>
+      prev.map((j) => {
+        if (j.key === key && j.file) {
+          try {
+            return { ...j, previewUrl: URL.createObjectURL(j.file) };
+          } catch {
+            return j;
+          }
+        }
+        return j;
+      }),
+    );
+  }, []);
 
   const handleHiddenInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) addFiles(Array.from(e.target.files));
@@ -301,6 +360,22 @@ export function Processor({
               ),
             );
             if (rec.state === "completed" || rec.state === "failed") {
+              if (rec.state === "completed" && operation === "video" && jobsRef.current.length === 1) {
+                try {
+                  const a = document.createElement("a");
+                  a.href = downloadUrl(rec.id);
+                  if (rec.outputFilename) a.download = rec.outputFilename;
+                  a.style.display = "none";
+                  document.body.appendChild(a);
+                  a.click();
+                  setTimeout(() => {
+                    if (document.body.contains(a)) document.body.removeChild(a);
+                  }, 1000);
+                  toast.success("Video ready! Saving directly to your device.");
+                } catch {
+                  window.location.href = downloadUrl(rec.id);
+                }
+              }
               eventSourcesRef.current.delete(job.key);
               const stillActive = jobsRef.current.some(
                 (j) => j.key !== job.key && (j.state === "queued" || j.state === "processing"),
@@ -342,6 +417,24 @@ export function Processor({
     toast.success(`Downloading ${ids.length} ${mediaNounPlural} as a ZIP…`);
   };
 
+  const [shareSupported, setShareSupported] = React.useState(false);
+  React.useEffect(() => {
+    setShareSupported(isShareSupported());
+  }, []);
+
+  const share = async (job: FileJob) => {
+    if (!job.result) return;
+    const url = downloadUrl(job.result.id);
+    const filename =
+      job.result.outputFilename ||
+      `${job.file.name.replace(/\.[^.]+$/, "")}-output.${job.result.outputFormat || "jpg"}`;
+    const shared = await shareFromUrl(url, filename, {
+      title: filename,
+      text: "Processed with PicTools",
+    });
+    if (shared) toast.success("Shared successfully!");
+  };
+
   const pendingCount = jobs.filter((j) => j.state === "pending" || j.state === "failed").length;
   const completedCount = jobs.filter((j) => j.state === "completed").length;
   const activeCount = jobs.filter((j) => ["queued", "processing"].includes(j.state)).length;
@@ -351,11 +444,36 @@ export function Processor({
   const zoomPan = useZoomPan(selected?.key);
   const zoomable = mediaKind === "image";
 
+  // Per-run credit price shown in the ToolHint next to the title.
+  const [runCost, setRunCost] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    let alive = true;
+    fetchCreditsCached()
+      .then((s) => {
+        if (alive) setRunCost(s.operationCosts?.[operation] ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [operation]);
+
   return (
     <div className="mx-auto max-w-[1280px] px-4 py-8 sm:px-6 md:py-10">
       <div className="mb-8">
-        <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.01em] text-balance sm:text-[32px] md:text-4xl">
+        <h1 className="flex items-center gap-2.5 font-display text-3xl font-semibold leading-tight tracking-[-0.01em] text-balance sm:text-[32px] md:text-4xl">
           {title}
+          <ToolHint label={`About ${title}`} className="shrink-0">
+            <span className="block">{description}</span>
+            {runCost != null && (
+              <span className="mt-2 block font-mono text-[11px] uppercase tracking-widest text-primary">
+                Costs {runCost} credit{runCost === 1 ? "" : "s"} per run
+              </span>
+            )}
+            <span className="mt-2 block text-on-surface-variant">
+              Credits are refunded automatically if processing fails.
+            </span>
+          </ToolHint>
         </h1>
         <p className="mt-2 max-w-2xl text-on-surface-variant">{description}</p>
       </div>
@@ -391,12 +509,12 @@ export function Processor({
               <div className="group relative flex flex-1 items-center justify-center bg-canvas p-4">
                 {/* View mode toggle for completed results */}
                 {selected.state === "completed" && selected.result && mediaKind !== "video" && (
-                  <div className="absolute left-4 top-4 z-10 flex items-center gap-1 rounded-lg border border-outline-variant/20 bg-background/90 p-1 backdrop-blur-md shadow-sm">
+                  <div className="absolute max-sm:bottom-3 max-sm:left-1/2 max-sm:-translate-x-1/2 max-sm:top-auto left-2 top-2 z-10 flex items-center gap-1 rounded-lg border border-outline-variant/20 bg-background/90 p-1 backdrop-blur-md shadow-sm sm:left-4 sm:top-4">
                     <button
                       type="button"
                       onClick={() => setViewMode("split")}
                       className={cn(
-                        "rounded-md px-2.5 py-1 font-display text-xs font-semibold transition-colors",
+                        "rounded-md px-2 py-1 font-display text-[11px] font-semibold transition-colors sm:px-2.5 sm:text-xs",
                         viewMode === "split"
                           ? "bg-primary text-on-primary shadow-xs"
                           : "text-on-surface-variant hover:text-foreground",
@@ -408,7 +526,7 @@ export function Processor({
                       type="button"
                       onClick={() => setViewMode("after")}
                       className={cn(
-                        "rounded-md px-2.5 py-1 font-display text-xs font-semibold transition-colors",
+                        "rounded-md px-2 py-1 font-display text-[11px] font-semibold transition-colors sm:px-2.5 sm:text-xs",
                         viewMode === "after"
                           ? "bg-primary text-on-primary shadow-xs"
                           : "text-on-surface-variant hover:text-foreground",
@@ -420,7 +538,7 @@ export function Processor({
                       type="button"
                       onClick={() => setViewMode("before")}
                       className={cn(
-                        "rounded-md px-2.5 py-1 font-display text-xs font-semibold transition-colors",
+                        "rounded-md px-2 py-1 font-display text-[11px] font-semibold transition-colors sm:px-2.5 sm:text-xs",
                         viewMode === "before"
                           ? "bg-primary text-on-primary shadow-xs"
                           : "text-on-surface-variant hover:text-foreground",
@@ -432,7 +550,7 @@ export function Processor({
                 )}
 
                 {/* Overlay toolbar */}
-                <div className="glass-panel absolute right-4 top-4 z-10 flex gap-1 rounded-lg border border-outline-variant/10 p-1 opacity-100 shadow-[0_12px_32px_rgba(0,0,0,0.2)] transition-opacity duration-300 focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+                <div className="glass-panel absolute right-2 top-2 z-10 flex gap-1 rounded-lg border border-outline-variant/10 p-1 opacity-100 shadow-[0_12px_32px_rgba(0,0,0,0.2)] transition-opacity duration-300 focus-within:opacity-100 sm:right-4 sm:top-4 sm:opacity-0 sm:group-hover:opacity-100">
                   <button
                     type="button"
                     title="Replace image"
@@ -461,7 +579,26 @@ export function Processor({
                   style={zoomable ? zoomPan.viewportStyle : undefined}
                   className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-white/5"
                 >
-                  {mediaKind === "video" ? (
+                  {mediaKind === "audio" ? (
+                    <div className="flex flex-col items-center justify-center gap-5 p-8 w-full max-w-md mx-auto">
+                      <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-primary/10 text-primary shadow-inner">
+                        <Music className="h-12 w-12 animate-pulse" />
+                      </div>
+                      <div className="text-center">
+                        <p className="font-display font-semibold text-foreground text-sm truncate max-w-xs">{selected.file.name}</p>
+                        <p className="font-mono text-xs text-on-surface-variant mt-1">{formatBytes(selected.file.size)}</p>
+                      </div>
+                      <audio
+                        src={
+                          selected.state === "completed" && selected.result
+                            ? downloadUrl(selected.result.id)
+                            : selected.previewUrl
+                        }
+                        controls
+                        className="w-full rounded-xl"
+                      />
+                    </div>
+                  ) : mediaKind === "video" ? (
                     <video
                       src={
                         selected.state === "completed" && selected.result
@@ -477,6 +614,7 @@ export function Processor({
                       beforeUrl={selected.previewUrl}
                       afterUrl={downloadUrl(selected.result.id)}
                       style={zoomable ? zoomPan.contentStyle : undefined}
+                      onBeforeError={() => handlePreviewError(selected.key)}
                     />
                   ) : (
                     /* eslint-disable-next-line @next/next/no-img-element */
@@ -488,6 +626,7 @@ export function Processor({
                           : selected.previewUrl
                       }
                       alt={selected.file.name}
+                      onError={() => handlePreviewError(selected.key)}
                       style={zoomable ? zoomPan.contentStyle : undefined}
                       className="h-auto max-h-[420px] w-auto max-w-full rounded-md object-contain"
                     />
@@ -495,7 +634,7 @@ export function Processor({
                   {selected.state === "pending" && (
                     <div className="pointer-events-none absolute inset-6 border-2 border-dashed border-primary/50" />
                   )}
-                  {zoomable && regionSelection && (
+                  {zoomable && regionSelection && viewMode !== "split" && (
                     <RegionSelector
                       imgRef={previewImgRef}
                       value={regionSelection.value}
@@ -597,9 +736,11 @@ export function Processor({
                   mediaKind={mediaKind}
                   running={running}
                   selected={job.key === selected?.key}
+                  shareSupported={shareSupported}
                   onSelect={() => setSelectedKey(job.key)}
                   onRemove={removeFile}
                   onDownload={download}
+                  onShare={share}
                 />
               ))}
             </div>
@@ -616,6 +757,11 @@ export function Processor({
                 {OPERATION_LABELS[operation].panel}
               </h2>
             </div>
+            {setSettings && (
+              <div className="mb-4">
+                <PresetBar operation={operation} settings={settings} onApply={setSettings} />
+              </div>
+            )}
             <div className="flex-1 space-y-8 overflow-y-auto pr-1 custom-scrollbar lg:max-h-[50vh]">
               {settingsPanel({ count: jobs.length, running, duration: selected?.duration ?? 0 })}
             </div>
@@ -653,6 +799,18 @@ export function Processor({
                 </Button>
               )}
 
+              {selected?.state === "completed" && selected.result && shareSupported && (
+                <Button
+                  variant="outline"
+                  className="w-full gap-2"
+                  onClick={() => void share(selected)}
+                  disabled={running}
+                >
+                  <Share2 className="h-4 w-4 text-primary" />
+                  Share {selected.file.name.slice(0, 16)}…
+                </Button>
+              )}
+
               {jobs.length > 0 && !running && (
                 <Button variant="ghost" className="w-full gap-2 text-primary" onClick={clearAll}>
                   <RefreshCcw className="h-4 w-4" />
@@ -672,17 +830,21 @@ function FileJobCard({
   mediaKind,
   running,
   selected,
+  shareSupported,
   onSelect,
   onRemove,
   onDownload,
+  onShare,
 }: {
   job: FileJob;
   mediaKind: MediaKind;
   running: boolean;
   selected: boolean;
+  shareSupported?: boolean;
   onSelect: () => void;
   onRemove: (key: string) => void;
   onDownload: (job: FileJob) => void;
+  onShare?: (job: FileJob) => void;
 }) {
   const isWorking = job.state === "queued" || job.state === "processing";
   const isDone = job.state === "completed";
@@ -699,8 +861,10 @@ function FileJobCard({
         isDone && selected && "border-l-2 border-emerald-500",
       )}
     >
-      <div className="h-12 w-12 shrink-0 overflow-hidden rounded-md bg-surface-container-high">
-        {mediaKind === "video" ? (
+      <div className="h-12 w-12 shrink-0 overflow-hidden rounded-md bg-surface-container-high flex items-center justify-center">
+        {mediaKind === "audio" ? (
+          <Music className="h-6 w-6 text-primary" />
+        ) : mediaKind === "video" ? (
           <video src={job.previewUrl} muted playsInline className="h-full w-full object-cover" />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
@@ -709,7 +873,14 @@ function FileJobCard({
       </div>
 
       <div className="min-w-0 flex-1">
-        <p className="truncate font-display text-[13px] font-semibold text-foreground">{job.file.name}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="truncate font-display text-[13px] font-semibold text-foreground">{job.file.name}</p>
+          {isHeicFile(job.file) && (
+            <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.2 font-mono text-[10px] font-medium text-primary">
+              HEIC
+            </span>
+          )}
+        </div>
         <p className="font-mono text-xs text-on-surface-variant">
           {isDone && job.result
             ? `Done • ${formatBytes(job.result.outputSize)}${job.result.outputFormat ? ` • ${formatFormat(job.result.outputFormat)}` : ""}`
@@ -733,10 +904,34 @@ function FileJobCard({
 
       <div className="flex shrink-0 items-center gap-1">
         {isDone && job.result && (
-          <Button size="sm" variant="outline" onClick={() => onDownload(job)} className="gap-1.5 px-2.5">
-            <Download className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Download</span>
-          </Button>
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDownload(job);
+              }}
+              className="gap-1.5 px-2.5"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Download</span>
+            </Button>
+            {shareSupported && onShare && (
+              <Button
+                size="icon"
+                variant="outline"
+                title="Share"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onShare(job);
+                }}
+                className="h-8 w-8 text-on-surface-variant hover:text-foreground"
+              >
+                <Share2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </>
         )}
         {isDone && (
           <span className="flex h-5 w-5 items-center justify-center">
@@ -754,7 +949,7 @@ function FileJobCard({
             size="icon"
             variant="ghost"
             aria-label={`Remove ${job.file.name}`}
-            className="h-8 w-8"
+            className="h-10 w-10"
             onClick={(e) => {
               e.stopPropagation();
               onRemove(job.key);

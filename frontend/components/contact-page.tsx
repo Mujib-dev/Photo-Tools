@@ -22,6 +22,13 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { submitContact } from "@/lib/api";
+import {
+  validateFullName,
+  validateEmail,
+  validatePhone,
+  hasQueryInjection,
+  sanitizeInput,
+} from "@/lib/validation";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^\+?[\d\s().-]{7,20}$/;
@@ -98,30 +105,33 @@ export function ContactPage() {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (name.trim().length < 2) {
-      setError("Please enter your name.");
+    const nameVal = validateFullName(name);
+    if (!nameVal.isValid) {
+      setError(nameVal.error || "Please enter your name.");
       return;
     }
-    if (!EMAIL_RE.test(email.trim())) {
-      setError("Enter a valid email address.");
+    const emailVal = validateEmail(email);
+    if (!emailVal.isValid) {
+      setError(emailVal.error || "Enter a valid email address.");
       return;
     }
-    if (!PHONE_RE.test(phone.trim())) {
-      setError("Enter a valid phone or WhatsApp number.");
-      return;
-    }
-    const digits = phoneDigits(phone);
-    if (digits.length < 7 || digits.length > 15) {
-      setError("Enter a valid phone or WhatsApp number (7–15 digits).");
+    const phoneVal = validatePhone(phone);
+    if (!phoneVal.isValid) {
+      setError(phoneVal.error || "Enter a valid phone or WhatsApp number.");
       return;
     }
     if (message.trim().length < 10) {
-      setError("Please write a short message (at least 10 characters).");
+      setError("Please write a message of at least 10 characters.");
       return;
     }
+    if (hasQueryInjection(message)) {
+      setError("Message contains unsafe query characters or script tokens.");
+      return;
+    }
+    const sanitizedMsg = sanitizeInput(message);
     setSubmitting(true);
     try {
-      await submitContact({ name, email, phone, subject, message });
+      await submitContact({ name: name.trim(), email: email.trim().toLowerCase(), phone: phone.trim(), subject, message: sanitizedMsg });
       setSubmitting(false);
       setSent(true);
       toast.success("Message sent!");

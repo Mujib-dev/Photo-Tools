@@ -8,6 +8,7 @@ import {
   Loader2,
   Plus,
   RefreshCcw,
+  Share2,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -41,6 +42,7 @@ import {
 import { createZip } from "@/lib/zip";
 import { formatBytes, formatPixels } from "@/lib/format";
 import { useZoomPan } from "@/lib/use-zoom-pan";
+import { isShareSupported, shareBlob } from "@/lib/share";
 import { cn } from "@/lib/utils";
 
 interface AdjustResult {
@@ -260,6 +262,21 @@ export function AdjustTool() {
     }
   };
 
+  const [shareSupported, setShareSupported] = React.useState(false);
+  React.useEffect(() => {
+    setShareSupported(isShareSupported());
+  }, []);
+
+  const shareItem = async (item: AdjustItem) => {
+    if (!item.result) return;
+    const filename = `${baseName(item.file.name)}-adjusted.${item.result.ext}`;
+    const shared = await shareBlob(item.result.blob, filename, {
+      title: filename,
+      text: "Adjusted with PicTools",
+    });
+    if (shared) toast.success("Shared successfully!");
+  };
+
   const removeItem = (key: string) => {
     setItems((prev) => {
       const target = prev.find((i) => i.key === key);
@@ -352,7 +369,7 @@ export function AdjustTool() {
                     onPointerUp={zoomPan.onPointerUp}
                     onPointerLeave={zoomPan.onPointerUp}
                     onDoubleClick={zoomPan.onDoubleClick}
-                    className="relative flex h-[60vh] w-full items-center justify-center overflow-hidden"
+                    className="relative flex h-[45vh] sm:h-[55vh] min-h-[250px] max-h-[520px] w-full items-center justify-center overflow-hidden"
                     style={zoomPan.viewportStyle}
                   >
                     <canvas
@@ -464,24 +481,40 @@ export function AdjustTool() {
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                       {item.result && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="gap-1.5 px-2.5"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            download(item);
-                          }}
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          <span className="hidden sm:inline">Download</span>
-                        </Button>
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 px-2.5"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              download(item);
+                            }}
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Download</span>
+                          </Button>
+                          {shareSupported && (
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              title="Share"
+                              className="h-8 w-8 text-on-surface-variant hover:text-foreground"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void shareItem(item);
+                              }}
+                            >
+                              <Share2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </>
                       )}
                       <Button
                         size="icon"
                         variant="ghost"
                         aria-label={`Remove ${item.file.name}`}
-                        className="h-8 w-8"
+                        className="h-10 w-10"
                         onClick={(e) => {
                           e.stopPropagation();
                           removeItem(item.key);

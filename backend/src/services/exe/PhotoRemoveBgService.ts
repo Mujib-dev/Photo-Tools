@@ -35,6 +35,9 @@ export class ExeRemoveBgService implements ProcessingService {
     if (settings.background === "custom" && settings.customColor) {
       args.push("--custom-color", settings.customColor);
     }
+    if (settings.model) {
+      args.push("--model", settings.model);
+    }
     const result = await this.runner.run("removebg", {
       args,
       timeoutMs: 600_000,

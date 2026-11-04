@@ -238,7 +238,7 @@ export function CropSelector({ imageUrl, aspect, initial, onChange }: CropSelect
             <span
               key={handle}
               data-handle={handle}
-              className="absolute h-3 w-3 rounded-sm border border-primary bg-white shadow"
+              className="absolute h-3.5 w-3.5 sm:h-3 sm:w-3 rounded-sm border border-primary bg-white shadow before:absolute before:-inset-2.5 before:content-['']"
               style={{
                 left: HANDLE_STYLE[handle].left,
                 top: HANDLE_STYLE[handle].top,

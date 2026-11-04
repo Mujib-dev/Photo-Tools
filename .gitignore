@@ -5,30 +5,29 @@
 
 # Dependencies
 node_modules/
+backend/node_modules/
+frontend/node_modules/
 
 # Build output
 backend/dist/
 frontend/.next/
 frontend/next-env.d.ts
 
+# Exclude Mobile App & Desktop Binaries (Web Only)
+mobile/
+bin/
+bin-src/
+
 # Runtime data
 temp/
 *.log
-bin-src/build/
-bin-src/build2/
-bin-src/dist/
-bin-src/__pycache__/
-bin-src/.pytest_cache/
-bin-src/test_out/
-bin-src/test_scanner_out/
-bin-src/_smoke_out/
-bin/*.bak
-bin/*.exe
 *.tsbuildinfo
-mobile/.expo/
 
 # OS / editor
 Thumbs.db
 .DS_Store
 .idea/
 .vscode/
+
+# Workflows (exclude CI workflow files)
+.github/

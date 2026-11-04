@@ -28,6 +28,38 @@ export class MemoryJobStore implements JobStore {
     for (const id of ids) this.jobs.delete(id);
   }
 
+  async list(limit: number): Promise<JobRecord[]> {
+    return [...this.jobs.values()]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, Math.max(0, Math.trunc(limit)));
+  }
+
+  async listSince(sinceMs: number, limit: number): Promise<JobRecord[]> {
+    return [...this.jobs.values()]
+      .filter((record) => record.createdAt >= sinceMs)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, Math.max(0, Math.trunc(limit)));
+  }
+
+  async listByUser(userId: string, limit: number, sinceMs?: number): Promise<JobRecord[]> {
+    const capped = Math.max(0, Math.trunc(limit));
+    return [...this.jobs.values()]
+      .filter(
+        (record) =>
+          record.userId === userId && (sinceMs == null || record.createdAt >= sinceMs),
+      )
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, capped);
+  }
+
+  async countByState(): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {};
+    for (const record of this.jobs.values()) {
+      counts[record.state] = (counts[record.state] ?? 0) + 1;
+    }
+    return counts;
+  }
+
   async sweepExpired(now: number): Promise<string[]> {
     const ids: string[] = [];
     for (const [id, record] of this.jobs) {

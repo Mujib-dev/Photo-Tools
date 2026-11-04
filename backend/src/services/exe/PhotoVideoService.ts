@@ -172,9 +172,9 @@ export class ExeVideoService implements ProcessingService {
     if (settings.resolution === "source") return null;
     const targetHeight = Number(settings.resolution);
     if (!probe.height || !probe.width || targetHeight <= 0 || probe.height <= targetHeight) return null;
-    // Keep the aspect ratio and force even dimensions for yuv420p.
+    // Keep the aspect ratio and force even dimensions for yuv420p with high-precision Lanczos resampling.
     const targetWidth = Math.max(2, Math.round((probe.width * targetHeight) / probe.height / 2) * 2);
-    return `scale=${targetWidth}:${targetHeight}`;
+    return `scale=${targetWidth}:${targetHeight}:flags=lanczos+accurate_rnd`;
   }
 
   private audioReserveKbps(settings: VideoSettings, probe: ProbeResult): number {
@@ -198,10 +198,13 @@ export class ExeVideoService implements ProcessingService {
     if (settings.speed !== 1) filters.push(`setpts=PTS/${settings.speed}`);
     const scale = this.scaleFilter(settings, probe);
     if (scale) filters.push(scale);
-    if (filters.length > 0) args.push("-vf", filters.join(","));
+    // Studio-grade clarity: 3D temporal-spatial noise reduction + Contrast-Adaptive Sharpening (CAS)
+    filters.push("hqdn3d=1.2:1.2:3:3");
+    filters.push("cas=0.35");
+    args.push("-vf", filters.join(","));
 
     if (container === "mp4") {
-      args.push("-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p");
+      args.push("-c:v", "libx264", "-preset", "medium", "-tune", "film", "-pix_fmt", "yuv420p");
       if (videoKbps && videoKbps > 0) {
         args.push(
           "-b:v",

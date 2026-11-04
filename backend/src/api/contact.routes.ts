@@ -2,6 +2,9 @@ import { Router } from "express";
 import { config } from "../config.js";
 import { Errors } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
+import { recordContact } from "../services/contactStore.js";
+import { sendEmail } from "../services/notify.js";
+import { contactNotification } from "../services/emailTemplates.js";
 
 const router = Router();
 
@@ -40,13 +43,30 @@ router.post("/", async (req, res, next) => {
       submittedAt: new Date().toISOString(),
     };
 
-    // In development, log the contact submission.
-    // In production, you would integrate with an email service (SendGrid, Resend, etc.)
+    recordContact({
+      name: sanitized.name,
+      email: sanitized.email,
+      phone: sanitized.phone,
+      subject: sanitized.subject,
+      message: sanitized.message,
+    });
+
+    // Notify the team by email. When SMTP is not configured the message is
+    // simply logged, so the stack still runs with no mail setup. A delivery
+    // failure must not fail the request — the submission is already stored.
+    try {
+      await sendEmail({
+        to: config.contactToEmail,
+        ...contactNotification(sanitized),
+      });
+    } catch (err) {
+      logger.error("Contact notification email failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     if (config.nodeEnv === "development") {
       logger.info("Contact form submission", sanitized);
-    } else {
-      // TODO: Replace with real email sending integration
-      logger.info("Contact form submission (production)", sanitized);
     }
 
     res.status(201).json({ ok: true, message: "Message sent successfully." });

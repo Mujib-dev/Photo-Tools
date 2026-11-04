@@ -450,7 +450,7 @@ export function FrameTool() {
                         size="icon"
                         variant="ghost"
                         aria-label={`Remove ${item.file.name}`}
-                        className="h-8 w-8"
+                        className="h-10 w-10"
                         onClick={(e) => {
                           e.stopPropagation();
                           removeItem(item.key);

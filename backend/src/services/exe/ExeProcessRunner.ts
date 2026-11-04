@@ -46,8 +46,11 @@ export class ExeProcessRunner {
       return Promise.reject(new Error(`Refusing to execute unknown operation "${operation}".`));
     }
     const isWindows = process.platform === "win32";
-    if (!existsSync(exePath) || (isWindows && !exePath.toLowerCase().endsWith(".exe"))) {
-      return Promise.reject(new Error(`Executable for "${operation}" is not a valid executable path.`));
+    const lower = exePath.toLowerCase();
+    const isExe = lower.endsWith(".exe");
+    const isPy = lower.endsWith(".py");
+    if (!existsSync(exePath) || (isWindows && !isExe && !isPy)) {
+      return Promise.reject(new Error(`Executable for "${operation}" is not a valid executable or script path.`));
     }
 
     return new Promise<RunResult>((resolve) => {
@@ -60,7 +63,11 @@ export class ExeProcessRunner {
       let timedOut = false;
       let settled = false;
 
-      const child = spawn(exePath, opts.args, {
+      const pythonExe = config.pythonExe || "python";
+      const cmd = isPy ? pythonExe : exePath;
+      const finalArgs = isPy ? [exePath, ...opts.args] : opts.args;
+
+      const child = spawn(cmd, finalArgs, {
         cwd: opts.cwd,
         env: { ...process.env, ...(opts.env ?? {}) },
         windowsHide: true,
@@ -92,7 +99,8 @@ export class ExeProcessRunner {
 
       child.stdout?.on("data", (chunk: Buffer) => {
         const text = chunk.toString("utf8");
-        if (stdout.length < MAX_CAPTURE_BYTES) stdout += text.slice(0, MAX_CAPTURE_BYTES);
+        const remainingOut = MAX_CAPTURE_BYTES - stdout.length;
+        if (remainingOut > 0) stdout += text.slice(0, remainingOut);
         if (opts.onStdoutLine) {
           stdoutRemainder += text;
           const lines = stdoutRemainder.split(/\r?\n/);
@@ -101,7 +109,9 @@ export class ExeProcessRunner {
         }
       });
       child.stderr?.on("data", (chunk: Buffer) => {
-        if (stderr.length < MAX_CAPTURE_BYTES) stderr += chunk.toString("utf8").slice(0, MAX_CAPTURE_BYTES);
+        const errText = chunk.toString("utf8");
+        const remainingErr = MAX_CAPTURE_BYTES - stderr.length;
+        if (remainingErr > 0) stderr += errText.slice(0, remainingErr);
       });
 
       child.on("error", (err) => {

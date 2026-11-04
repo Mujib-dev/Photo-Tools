@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;600;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -9,12 +10,13 @@
     --foreground: 228 16% 12%; /* #191b23 */
     --card: 0 0% 100%; /* #ffffff */
     --card-foreground: 228 16% 12%;
+    --surface: 0 0% 100%; /* #ffffff */
     --popover: 0 0% 100%;
     --popover-foreground: 228 16% 12%;
     --primary: 217 100% 39%; /* #004ac6 */
     --primary-foreground: 0 0% 100%;
     --primary-container: 222 83% 53%; /* #2563eb */
-    --on-primary-container: 237 100% 97%; /* #eeefff */
+    --on-primary-container: 0 0% 100%; /* #ffffff */
     --secondary: 240 37% 93%; /* #e7e7f3 */
     --secondary-foreground: 228 16% 12%;
     --muted: 240 50% 95%; /* #ededf9 */
@@ -47,6 +49,7 @@
     --foreground: 240 68% 96%; /* #f0f0fb */
     --card: 222 47% 11%; /* #0f172a */
     --card-foreground: 240 68% 96%;
+    --surface: 222 47% 11%; /* #0f172a */
     --popover: 222 47% 11%;
     --popover-foreground: 240 68% 96%;
     --primary: 227 100% 85%; /* #b4c5ff */
@@ -84,13 +87,66 @@
 
   html {
     -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
     overflow-x: hidden;
   }
 
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "cv02", "cv03", "cv11";
+    /* `clip` instead of `hidden`: `overflow-x: hidden` turns <body> into a
+       scroll container (overflow-y computes to auto), and a scrolling <body>
+       becomes the scrollport for `position: sticky` children — the header
+       would then never stick because <body> itself never scrolls.
+       `overflow: clip` clips the same overflow without creating a scroll
+       container, so the viewport stays the scrollport and sticky works.
+       The `hidden` line is a fallback for engines without `overflow: clip`. */
     overflow-x: hidden;
+    overflow-x: clip;
+    /* Long unbroken strings (emails, URLs, file ids) must never push the page
+       wider than the viewport on a narrow phone. */
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  /* Media and embeds are always capped at their container width. */
+  img,
+  svg,
+  video,
+  canvas,
+  iframe {
+    max-width: 100%;
+  }
+
+  /* Removes the 300ms double-tap delay and the grey tap flash on mobile. */
+  button,
+  [role="button"],
+  label,
+  summary {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: hsl(var(--primary) / 0.18);
+  }
+
+  /* A visible keyboard focus ring for elements that do not define their own.
+     Utilities such as `focus-visible:outline-none` still win because they
+     live in a later cascade layer. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Prevent Radix / react-remove-scroll from locking page scroll and freezing tables */
+  body[data-scroll-locked] {
+    overflow: visible !important;
+    margin-right: 0px !important;
+    padding-right: 0px !important;
+    position: static !important;
+  }
+
+  html[data-scroll-locked] {
+    overflow: visible !important;
+    margin-right: 0px !important;
+    padding-right: 0px !important;
   }
 }
 
@@ -103,7 +159,39 @@
   }
 }
 
+/* Visual templates add a light layer of personality on top of the token set. */
+html[data-template-style="neon"] .glass-panel {
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.22),
+    0 14px 44px -16px hsl(var(--primary) / 0.5);
+}
+
+html[data-template-style="editorial"] .font-display {
+  letter-spacing: -0.015em;
+}
+
+html[data-template-style="mono"] .font-display {
+  letter-spacing: -0.03em;
+}
+
+html[data-template-style="soft"] .glass-panel {
+  box-shadow: 0 16px 44px -24px hsl(var(--primary) / 0.4);
+}
+
+html[data-template-style="organic"] .glass-panel {
+  box-shadow: 0 14px 36px -24px hsl(var(--primary) / 0.45);
+}
+
 @layer utilities {
+  /* Explicit so blue buttons always get white text even if the Tailwind theme
+     color is not picked up (text-on-primary* are used across the app). */
+  .text-on-primary {
+    color: hsl(var(--primary-foreground));
+  }
+  .text-on-primary-container {
+    color: hsl(var(--on-primary-container));
+  }
+
   .bg-hero-grid {
     background-image:
       linear-gradient(to right, hsl(var(--outline-variant) / 0.4) 1px, transparent 1px),
@@ -135,4 +223,143 @@
     background: hsl(var(--outline-variant) / 0.4);
     border-radius: 4px;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Device-friendly foundations
+   --------------------------------------------------------------------------- */
+
+/* iOS Safari zooms the whole page when a focused field renders below 16px.
+   `max(16px, 1em)` keeps the field at least 16px without shrinking text that
+   is already larger. */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+  /* High-legibility Nastaliq / Naskh Arabic script typography for Urdu, Arabic, Persian */
+  .font-urdu {
+    font-family: "Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", "Urdu Typesetting", "PakType Tehreer", "Noto Sans Arabic", "Segoe UI", system-ui, sans-serif;
+    line-height: 2.2;
+    letter-spacing: 0;
+  }
+}
+
+/* Honour the OS "reduce motion" preference. */
+@media (prefers-reduced-motion: reduce) {
+  html,
+  body {
+    scroll-behavior: auto !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Spinners still have to read as "working", so they keep a slow, gentle
+     rotation instead of freezing on a single frame. */
+  .animate-spin,
+  .animate-ping,
+  .animate-pulse {
+    animation-duration: 2.4s !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  /* Progress bars stop sweeping and instead breathe via opacity only. */
+  .shimmer-indeterminate {
+    animation: reduced-motion-breathe 2s ease-in-out infinite !important;
+  }
+}
+
+@keyframes reduced-motion-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Sonner Toast Notification - Polished Right-Anchored Close ("✕") Button
+   --------------------------------------------------------------------------- */
+:root,
+body,
+[data-sonner-toaster] {
+  --toast-close-button-start: unset !important;
+  --toast-close-button-end: 12px !important;
+  --toast-close-button-transform: translateY(-50%) !important;
+}
+
+[data-sonner-toast] {
+  padding-right: 44px !important; /* Ensure message text never collides with the close button */
+}
+
+/* Anchor the close "✕" button cleanly at the right end of the toast notification */
+[data-sonner-toaster] [data-sonner-toast] [data-close-button],
+[data-sonner-toast] [data-close-button],
+button[data-close-button] {
+  position: absolute !important;
+  left: unset !important;
+  right: 12px !important;
+  top: 50% !important;
+  bottom: unset !important;
+  transform: translateY(-50%) !important;
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  min-height: 22px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 9999px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  cursor: pointer !important;
+  opacity: 0.9 !important; /* Always clearly visible on the right */
+  color: inherit !important;
+  background: rgba(0, 0, 0, 0.12) !important;
+  border: 1px solid rgba(0, 0, 0, 0.16) !important;
+  transition: opacity 0.15s ease, transform 0.15s ease, background-color 0.15s ease !important;
+  z-index: 9999 !important;
+}
+
+[data-sonner-toaster] [data-sonner-toast] [data-close-button]:hover,
+[data-sonner-toast] [data-close-button]:hover {
+  opacity: 1 !important;
+  background: rgba(0, 0, 0, 0.22) !important;
+  transform: translateY(-50%) scale(1.1) !important;
+}
+
+[data-sonner-toaster] [data-sonner-toast] [data-close-button]:active,
+[data-sonner-toast] [data-close-button]:active {
+  transform: translateY(-50%) scale(0.95) !important;
+}
+
+[data-sonner-toaster] [data-sonner-toast] [data-close-button] svg,
+[data-sonner-toast] [data-close-button] svg {
+  width: 13px !important;
+  height: 13px !important;
+  stroke-width: 2.5 !important;
+  stroke: currentColor !important;
+}
+
+/* Dark mode adjustments for toast close button */
+.dark [data-sonner-toaster] [data-sonner-toast] [data-close-button],
+.dark [data-sonner-toast] [data-close-button] {
+  background: rgba(255, 255, 255, 0.18) !important;
+  border: 1px solid rgba(255, 255, 255, 0.28) !important;
+  color: inherit !important;
+}
+
+.dark [data-sonner-toaster] [data-sonner-toast] [data-close-button]:hover,
+.dark [data-sonner-toast] [data-close-button]:hover {
+  background: rgba(255, 255, 255, 0.32) !important;
 }

@@ -11,6 +11,8 @@ interface BeforeAfterSliderProps {
   afterLabel?: string;
   className?: string;
   style?: React.CSSProperties;
+  onBeforeError?: () => void;
+  onAfterError?: () => void;
 }
 
 export function BeforeAfterSlider({
@@ -20,6 +22,8 @@ export function BeforeAfterSlider({
   afterLabel = "After",
   className,
   style,
+  onBeforeError,
+  onAfterError,
 }: BeforeAfterSliderProps) {
   const [sliderPos, setSliderPos] = React.useState(50);
   const [isDragging, setIsDragging] = React.useState(false);
@@ -34,17 +38,26 @@ export function BeforeAfterSlider({
   }, []);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
     setIsDragging(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
     updatePosition(e.clientX);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDragging) return;
+    e.stopPropagation();
     updatePosition(e.clientX);
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isDragging) {
+      e.stopPropagation();
+    }
     setIsDragging(false);
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
@@ -52,6 +65,24 @@ export function BeforeAfterSlider({
       // ignore
     }
   };
+
+  React.useEffect(() => {
+    if (!isDragging) return;
+    const onMove = (e: PointerEvent) => {
+      updatePosition(e.clientX);
+    };
+    const onUp = () => {
+      setIsDragging(false);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [isDragging, updatePosition]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowLeft") {
@@ -77,7 +108,7 @@ export function BeforeAfterSlider({
       onPointerCancel={handlePointerUp}
       style={style}
       className={cn(
-        "relative select-none overflow-hidden rounded-md cursor-ew-resize touch-none",
+        "relative z-10 select-none overflow-hidden rounded-md cursor-ew-resize touch-none",
         className,
       )}
     >
@@ -87,6 +118,7 @@ export function BeforeAfterSlider({
         src={afterUrl}
         alt={afterLabel}
         draggable={false}
+        onError={onAfterError}
         className="pointer-events-none block h-auto max-h-[420px] w-auto max-w-full rounded-md object-contain"
       />
 
@@ -100,6 +132,7 @@ export function BeforeAfterSlider({
           src={beforeUrl}
           alt={beforeLabel}
           draggable={false}
+          onError={onBeforeError}
           className="block h-full w-full object-contain"
         />
       </div>
@@ -118,7 +151,7 @@ export function BeforeAfterSlider({
         style={{ left: `${sliderPos}%` }}
       >
         {/* Drag Handle */}
-        <div className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-primary text-white shadow-lg transition-transform hover:scale-110 active:scale-95">
+        <div className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 flex h-11 w-11 items-center justify-center rounded-full border-2 border-white bg-primary text-white shadow-lg transition-transform hover:scale-110 active:scale-95">
           <MoveHorizontal className="h-4 w-4" />
         </div>
       </div>

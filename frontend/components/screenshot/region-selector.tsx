@@ -106,7 +106,7 @@ export function RegionSelector({
           type="button"
           onClick={onCancel}
           aria-label="Cancel"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/25 text-white transition-colors hover:bg-white/10"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/25 text-white transition-colors hover:bg-white/10"
         >
           <X className="h-4 w-4" />
         </button>

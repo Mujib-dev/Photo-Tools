@@ -155,3 +155,43 @@ export function fitAspectRect(normAspect: number): NormRect {
 export function baseName(name: string): string {
   return name.replace(/\.[^.]+$/, "") || "image";
 }
+
+/**
+ * Computes optimal Rule-of-Thirds framing positioning the focal subject
+ * at one of the four compositional intersection power points (1/3 or 2/3).
+ */
+export function computeRuleOfThirdsCrop(
+  imgW: number,
+  imgH: number,
+  aspectRatio: number | null = null,
+  focalNormX = 0.5,
+  focalNormY = 0.4,
+): NormRect {
+  const targetAspect = aspectRatio ?? imgW / imgH;
+  const normAspect = targetAspect / (imgW / imgH);
+
+  let cropW = 0.82;
+  let cropH = 0.82 / normAspect;
+
+  if (cropH > 0.98) {
+    cropH = 0.9;
+    cropW = cropH * normAspect;
+  }
+  if (cropW > 0.98) {
+    cropW = 0.9;
+    cropH = cropW / normAspect;
+  }
+
+  // Rule of thirds power point placement
+  const powerX = focalNormX >= 0.5 ? 2 / 3 : 1 / 3;
+  const powerY = focalNormY >= 0.5 ? 2 / 3 : 1 / 3;
+
+  let x = focalNormX - powerX * cropW;
+  let y = focalNormY - powerY * cropH;
+
+  x = Math.max(0, Math.min(1 - cropW, x));
+  y = Math.max(0, Math.min(1 - cropH, y));
+
+  return { x, y, width: cropW, height: cropH };
+}
+

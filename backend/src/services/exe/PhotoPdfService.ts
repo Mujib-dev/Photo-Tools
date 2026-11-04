@@ -14,6 +14,10 @@ const PRIMARY_OUTPUT: Record<PdfSettings["op"], (base: string) => string> = {
   split: (base) => `${base}.zip`,
   tojpg: (base) => `${base}.zip`,
   edit: (base) => `${base}.pdf`,
+  compress: (base) => `${base}.pdf`,
+  img2pdf: (base) => `${base}.pdf`,
+  protect: (base) => `${base}-protected.pdf`,
+  unlock: (base) => `${base}-unlocked.pdf`,
 };
 
 /**

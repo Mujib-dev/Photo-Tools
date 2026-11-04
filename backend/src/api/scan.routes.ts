@@ -70,6 +70,8 @@ export function scanRoutes(jobs: JobManager, scanner: ExeScannerService): Router
       const fullSettings = { mode: settings.mode, format: settings.format, pages };
 
       const record = await jobs.createJob({
+
+        userId: req.authUser?.id ?? null,
         id: jobId,
         operation: "scan",
         inputFilename: files.length === 1 ? files[0].originalname : `${files.length} pages`,

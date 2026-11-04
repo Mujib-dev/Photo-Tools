@@ -22,6 +22,7 @@ export function ConvertTool() {
         description="Convert your images into .ico icons or JPG, PNG, BMP, TIFF, WEBP and GIF formats."
         submit={(file, s) => submitConvert(file, s as ConvertSettings)}
         settings={settings}
+        setSettings={(s) => setSettings(s as ConvertSettings)}
         settingsPanel={() => <ConvertSettingsForm value={settings} onChange={setSettings} />}
       />
     </AuthGate>

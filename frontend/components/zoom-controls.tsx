@@ -36,7 +36,7 @@ export function ZoomControls({
         size="icon"
         variant="ghost"
         aria-label="Zoom out"
-        className="h-7 w-7"
+        className="h-10 w-10"
         disabled={zoom <= MIN_ZOOM}
         onClick={onZoomOut}
       >
@@ -54,7 +54,7 @@ export function ZoomControls({
         size="icon"
         variant="ghost"
         aria-label="Zoom in"
-        className="h-7 w-7"
+        className="h-10 w-10"
         disabled={zoom >= MAX_ZOOM}
         onClick={onZoomIn}
       >

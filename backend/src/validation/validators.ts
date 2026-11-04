@@ -1,6 +1,7 @@
 import { Errors } from "../utils/errors.js";
+import { unwrapGoogleUrl } from "../security/urlGuard.js";
 
-export type ImageFormat = "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff";
+export type ImageFormat = "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "heic";
 
 export const RESIZE_OUTPUT_FORMATS = ["jpg", "jpeg", "png", "bmp", "tiff"] as const;
 export type ResizeOutputFormat = (typeof RESIZE_OUTPUT_FORMATS)[number];
@@ -95,6 +96,13 @@ const MAGIC: { format: ImageFormat; match: (b: Buffer) => boolean }[] = [
       b.toString("latin1", 0, 4) === "RIFF" &&
       b.toString("latin1", 8, 12) === "WEBP",
   },
+  {
+    format: "heic",
+    match: (b) =>
+      b.length > 11 &&
+      b.toString("latin1", 4, 8) === "ftyp" &&
+      ["heic", "heix", "hevc", "mif1", "msf1"].includes(b.toString("latin1", 8, 12).toLowerCase()),
+  },
 ];
 
 const EXTENSION_TO_FORMAT: Record<string, ImageFormat> = {
@@ -106,6 +114,8 @@ const EXTENSION_TO_FORMAT: Record<string, ImageFormat> = {
   ".tiff": "tiff",
   ".tif": "tiff",
   ".webp": "webp",
+  ".heic": "heic",
+  ".heif": "heic",
 };
 
 export function detectImageFormat(buffer: Buffer, originalName: string): ImageFormat {
@@ -381,11 +391,16 @@ export type RemoveBgBackground = (typeof REMOVEBG_BACKGROUNDS)[number];
 export const REMOVEBG_OUTPUT_FORMATS = ["png", "jpg", "webp"] as const;
 export type RemoveBgOutputFormat = (typeof REMOVEBG_OUTPUT_FORMATS)[number];
 
+export const REMOVEBG_MODELS = ["u2net", "u2netp", "u2net_human_seg", "isnet-general-use", "silueta"] as const;
+export type RemoveBgModel = (typeof REMOVEBG_MODELS)[number];
+
 export interface RemoveBgSettings {
   background: RemoveBgBackground;
   format: RemoveBgOutputFormat;
   /** Custom background color as 'r,g,b' or 'r,g,b,a' (0-255) when background="custom". */
   customColor?: string;
+  model?: RemoveBgModel;
+  alphaMatting?: boolean;
 }
 
 export function parseRemoveBgSettings(raw: unknown): RemoveBgSettings {
@@ -423,7 +438,17 @@ export function parseRemoveBgSettings(raw: unknown): RemoveBgSettings {
     }
   }
 
-  return { background, format, customColor };
+  let model: RemoveBgModel | undefined;
+  if (r.model !== undefined) {
+    const m = String(r.model).toLowerCase();
+    if ((REMOVEBG_MODELS as readonly string[]).includes(m)) {
+      model = m as RemoveBgModel;
+    }
+  }
+
+  const alphaMatting = r.alphaMatting === true || r.alphaMatting === "true";
+
+  return { background, format, customColor, model, alphaMatting: alphaMatting ? true : undefined };
 }
 
 export const COMPRESS_OUTPUT_FORMATS = ["keep", "jpg", "webp"] as const;
@@ -749,6 +774,86 @@ export function parseVideoSettings(raw: unknown): VideoSettings {
   };
 }
 
+export const URL_DOWNLOAD_FORMATS = ["mp4", "webm", "mp3", "m4a"] as const;
+export type UrlDownloadFormat = (typeof URL_DOWNLOAD_FORMATS)[number];
+
+export const URL_DOWNLOAD_AUDIO_FORMATS: readonly UrlDownloadFormat[] = ["mp3", "m4a"];
+
+export interface UrlDownloadSettings {
+  /** The http(s) URL to fetch. Direct media files and HLS playlists only. */
+  url: string;
+  /** A quality id from the analyze response, or `preset:<height>`. */
+  quality: string;
+  format: UrlDownloadFormat;
+  title?: string;
+  kind?: string;
+  threads?: number;
+  proxy?: string;
+}
+
+const URL_QUALITY_RE = /^(?:source|\d{3,4}|preset:(?:\d{3,4})|hls-\d{1,3}|archive-\d{1,4})$/;
+
+export function parseUrlDownloadSettings(raw: unknown): UrlDownloadSettings {
+  if (typeof raw !== "object" || raw === null) throw Errors.invalidSettings();
+  const r = raw as Record<string, unknown>;
+
+  const rawUrl = String(r.url ?? "").trim();
+  const url = unwrapGoogleUrl(rawUrl).trim();
+  if (!url || url.length > 2048) {
+    throw Errors.invalidSettings("url is required (max 2048 characters).");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw Errors.invalidSettings("url must be a valid http(s) URL.");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw Errors.invalidSettings("url must be an http or https URL.");
+  }
+
+  let quality = String(r.quality ?? "source").trim().toLowerCase();
+  if (!URL_QUALITY_RE.test(quality)) quality = "source";
+
+  let format: UrlDownloadFormat = "mp4";
+  if (r.format !== undefined) {
+    const f = String(r.format).toLowerCase();
+    if (!(URL_DOWNLOAD_FORMATS as readonly string[]).includes(f)) {
+      throw Errors.invalidSettings("format must be one of mp4, webm, mp3, m4a.");
+    }
+    format = f as UrlDownloadFormat;
+  }
+
+  const title = typeof r.title === "string" && r.title.trim().length > 0
+    ? r.title.trim().slice(0, 300)
+    : undefined;
+  const kind = typeof r.kind === "string" && ["direct", "hls", "stream"].includes(r.kind.trim())
+    ? r.kind.trim()
+    : undefined;
+
+  let threads: number | undefined;
+  if (r.threads !== undefined) {
+    const t = Number(r.threads);
+    if (Number.isInteger(t) && t >= 1 && t <= 32) {
+      threads = t;
+    }
+  }
+
+  let proxy: string | undefined;
+  if (typeof r.proxy === "string") {
+    const p = r.proxy.trim();
+    if (p && p.length <= 512) {
+      proxy = p;
+    }
+  }
+
+  return { url, quality, format, title, kind, threads, proxy };
+}
+
+export function isAudioOnlyFormat(format: UrlDownloadFormat): boolean {
+  return URL_DOWNLOAD_AUDIO_FORMATS.includes(format);
+}
+
 export type WatermarkPosition =
   | "center"
   | "top-left"
@@ -758,7 +863,9 @@ export type WatermarkPosition =
   | "tile";
 
 export interface WatermarkSettings {
-  text: string;
+  watermarkType?: "text" | "image";
+  text?: string;
+  imageWatermarkPath?: string;
   position: WatermarkPosition;
   opacity: number;
   size: number;
@@ -782,15 +889,25 @@ function sanitizeWatermarkText(raw: unknown): string {
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
     .trim()
     .slice(0, 60);
-  if (!text) throw Errors.invalidSettings("watermark text must not be empty.");
   return text;
 }
 
-export function parseWatermarkSettings(raw: unknown): WatermarkSettings {
+export function parseWatermarkSettings(raw: unknown, hasImage = false): WatermarkSettings {
   if (typeof raw !== "object" || raw === null) throw Errors.invalidSettings();
   const r = raw as Record<string, unknown>;
 
-  const text = sanitizeWatermarkText(r.text);
+  const watermarkType: "text" | "image" =
+    r.watermarkType === "image" || hasImage || typeof r.imageWatermarkPath === "string"
+      ? "image"
+      : "text";
+
+  let text: string | undefined = undefined;
+  if (watermarkType === "text") {
+    text = sanitizeWatermarkText(r.text);
+    if (!text) throw Errors.invalidSettings("watermark text must not be empty.");
+  } else if (r.text) {
+    text = sanitizeWatermarkText(r.text);
+  }
 
   let position: WatermarkPosition = "center";
   if (r.position !== undefined) {
@@ -815,8 +932,8 @@ export function parseWatermarkSettings(raw: unknown): WatermarkSettings {
   let size = 8;
   if (r.size !== undefined) {
     const n = Number(r.size);
-    if (typeof n !== "number" || !Number.isFinite(n) || n < 2 || n > 30) {
-      throw Errors.invalidSettings("size must be between 2 and 30 (% of image width).");
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 2 || n > 50) {
+      throw Errors.invalidSettings("size must be between 2 and 50 (% of image width).");
     }
     size = Math.round(n);
   }
@@ -835,10 +952,13 @@ export function parseWatermarkSettings(raw: unknown): WatermarkSettings {
     format = f as EnhanceOutputFormat;
   }
 
-  return { text, position, opacity, size, color, format };
+  const imageWatermarkPath =
+    typeof r.imageWatermarkPath === "string" ? r.imageWatermarkPath : undefined;
+
+  return { watermarkType, text, imageWatermarkPath, position, opacity, size, color, format };
 }
 
-export const PDF_OPS = ["convert", "merge", "split", "tojpg", "edit"] as const;
+export const PDF_OPS = ["convert", "merge", "split", "tojpg", "edit", "compress", "img2pdf", "protect", "unlock"] as const;
 export type PdfOp = (typeof PDF_OPS)[number];
 
 export const PDF_MAX_FILES = 10;
@@ -928,12 +1048,23 @@ export interface PdfEditPlan {
   metadata: PdfEditMetadata;
 }
 
+export interface PdfSecurityPermissions {
+  print?: boolean;
+  copy?: boolean;
+  edit?: boolean;
+  annotate?: boolean;
+}
+
 export interface PdfSettings {
   op: PdfOp;
   inputsDir: string;
   inputFiles: string[];
   /** Present for the "edit" op only. */
   plan: PdfEditPlan;
+  userPassword?: string;
+  ownerPassword?: string;
+  permissions?: PdfSecurityPermissions;
+  password?: string;
 }
 
 const PDF_EDIT_FONTS: PdfEditFont[] = ["helv", "hebo", "cour", "cobo"];
@@ -1104,8 +1235,208 @@ export function parsePdfSettings(raw: unknown): PdfSettings {
   const r = raw as Record<string, unknown>;
   const op = String(r.op ?? "").toLowerCase();
   if (!(PDF_OPS as readonly string[]).includes(op)) {
-    throw Errors.invalidSettings("op must be one of convert, merge, split, tojpg, edit.");
+    throw Errors.invalidSettings(
+      "op must be one of convert, merge, split, tojpg, edit, compress, img2pdf, protect, unlock.",
+    );
   }
   const plan = op === "edit" ? parsePdfEditPlan(r.plan) : { pages: [], annotations: [], metadata: {} };
-  return { op: op as PdfOp, inputsDir: "", inputFiles: [], plan };
+
+  let userPassword = typeof r.userPassword === "string" ? r.userPassword : undefined;
+  let ownerPassword = typeof r.ownerPassword === "string" ? r.ownerPassword : undefined;
+  let password = typeof r.password === "string" ? r.password : undefined;
+
+  let permissions: PdfSecurityPermissions | undefined;
+  if (typeof r.permissions === "object" && r.permissions !== null) {
+    const p = r.permissions as Record<string, unknown>;
+    permissions = {
+      print: p.print !== false,
+      copy: p.copy !== false,
+      edit: p.edit === true,
+      annotate: p.annotate === true,
+    };
+  }
+
+  return {
+    op: op as PdfOp,
+    inputsDir: "",
+    inputFiles: [],
+    plan,
+    userPassword,
+    ownerPassword,
+    permissions,
+    password,
+  };
+}
+
+export const AUDIO_OUTPUT_FORMATS = ["mp3", "wav", "m4a", "aac", "flac", "ogg", "opus"] as const;
+export type AudioOutputFormat = (typeof AUDIO_OUTPUT_FORMATS)[number];
+
+export const AUDIO_BITRATES = [64, 96, 128, 192, 256, 320] as const;
+export const AUDIO_SAMPLE_RATES = [22050, 44100, 48000, 96000] as const;
+export const AUDIO_CHANNELS = ["keep", "mono", "stereo"] as const;
+export type AudioChannels = (typeof AUDIO_CHANNELS)[number];
+
+export const VOICE_PRESETS = [
+  "none",
+  "girl",
+  "man",
+  "baby",
+  "chipmunk",
+  "monster",
+  "robot",
+  "helium",
+  "radio",
+  "echo",
+  "studio",
+] as const;
+export type VoicePreset = (typeof VOICE_PRESETS)[number];
+
+export const AUDIO_STEM_MODES = ["vocals", "instrumental"] as const;
+export type AudioStemMode = (typeof AUDIO_STEM_MODES)[number];
+
+export interface AudioSettings {
+  format: AudioOutputFormat;
+  bitrate: number;
+  sampleRate?: number;
+  channels?: AudioChannels;
+  volume?: number;
+  trimStart?: number;
+  trimEnd?: number;
+  voicePreset?: VoicePreset;
+  pitchShift?: number; // Semitones: -12 to +12
+  speed?: number; // Tempo: 0.5 to 2.0
+  reverb?: number; // 0 to 1
+  copyStream?: boolean; // Direct lossless audio extraction without re-encoding
+  stemMode?: AudioStemMode; // Vocal removal / stem extraction
+}
+
+export function parseAudioSettings(raw: unknown): AudioSettings {
+  if (typeof raw !== "object" || raw === null) throw Errors.invalidSettings();
+  const r = raw as Record<string, unknown>;
+
+  const formatRaw = String(r.format ?? "mp3").toLowerCase();
+  if (!(AUDIO_OUTPUT_FORMATS as readonly string[]).includes(formatRaw)) {
+    throw Errors.invalidSettings("Format must be one of: mp3, wav, m4a, aac, flac, ogg, opus.");
+  }
+  const format = formatRaw as AudioOutputFormat;
+
+  const bitrateNum = Number(r.bitrate ?? 192);
+  const bitrate = Number.isFinite(bitrateNum) && bitrateNum >= 32 && bitrateNum <= 512
+    ? Math.round(bitrateNum)
+    : 192;
+
+  let sampleRate: number | undefined;
+  if (r.sampleRate !== undefined) {
+    const sr = Number(r.sampleRate);
+    if (AUDIO_SAMPLE_RATES.includes(sr as (typeof AUDIO_SAMPLE_RATES)[number])) {
+      sampleRate = sr;
+    }
+  }
+
+  let channels: AudioChannels = "keep";
+  if (typeof r.channels === "string" && (AUDIO_CHANNELS as readonly string[]).includes(r.channels.toLowerCase())) {
+    channels = r.channels.toLowerCase() as AudioChannels;
+  }
+
+  let volume: number | undefined;
+  if (r.volume !== undefined) {
+    const v = Number(r.volume);
+    if (Number.isFinite(v) && v >= 0.1 && v <= 5) {
+      volume = Math.round(v * 100) / 100;
+    }
+  }
+
+  let trimStart: number | undefined;
+  if (r.trimStart !== undefined) {
+    const s = Number(r.trimStart);
+    if (Number.isFinite(s) && s >= 0) trimStart = Math.max(0, s);
+  }
+
+  let trimEnd: number | undefined;
+  if (r.trimEnd !== undefined) {
+    const e = Number(r.trimEnd);
+    if (Number.isFinite(e) && e > 0) trimEnd = e;
+  }
+
+  let voicePreset: VoicePreset | undefined;
+  if (typeof r.voicePreset === "string" && (VOICE_PRESETS as readonly string[]).includes(r.voicePreset.toLowerCase())) {
+    voicePreset = r.voicePreset.toLowerCase() as VoicePreset;
+  }
+
+  let pitchShift: number | undefined;
+  if (r.pitchShift !== undefined) {
+    const p = Number(r.pitchShift);
+    if (Number.isFinite(p) && p >= -24 && p <= 24) {
+      pitchShift = Math.round(p * 10) / 10;
+    }
+  }
+
+  let speed: number | undefined;
+  if (r.speed !== undefined) {
+    const s = Number(r.speed);
+    if (Number.isFinite(s) && s >= 0.25 && s <= 4) {
+      speed = Math.round(s * 100) / 100;
+    }
+  }
+
+  let reverb: number | undefined;
+  if (r.reverb !== undefined) {
+    const rv = Number(r.reverb);
+    if (Number.isFinite(rv) && rv >= 0 && rv <= 1) {
+      reverb = Math.round(rv * 100) / 100;
+    }
+  }
+
+  const copyStream = r.copyStream === true;
+
+  let stemMode: AudioStemMode | undefined;
+  if (typeof r.stemMode === "string" && (AUDIO_STEM_MODES as readonly string[]).includes(r.stemMode.toLowerCase())) {
+    stemMode = r.stemMode.toLowerCase() as AudioStemMode;
+  }
+
+  return {
+    format,
+    bitrate,
+    sampleRate,
+    channels,
+    volume,
+    trimStart,
+    trimEnd,
+    voicePreset,
+    pitchShift,
+    speed,
+    reverb,
+    copyStream,
+    stemMode,
+  };
+}
+
+export const OCR_OUTPUT_FORMATS = ["json", "txt", "docx"] as const;
+export type OcrOutputFormat = (typeof OCR_OUTPUT_FORMATS)[number];
+
+export interface OcrSettings {
+  language?: string;
+  format: OcrOutputFormat;
+}
+
+export function parseOcrSettings(raw: unknown): OcrSettings {
+  if (typeof raw !== "object" || raw === null) {
+    return { format: "txt" };
+  }
+  const r = raw as Record<string, unknown>;
+
+  let language: string | undefined = undefined;
+  if (r.language !== undefined && r.language !== null && r.language !== "") {
+    language = String(r.language).trim();
+  }
+
+  let format: OcrOutputFormat = "txt";
+  if (r.format !== undefined && r.format !== null && r.format !== "") {
+    const f = String(r.format).toLowerCase();
+    if ((OCR_OUTPUT_FORMATS as readonly string[]).includes(f)) {
+      format = f as OcrOutputFormat;
+    }
+  }
+
+  return { language, format };
 }

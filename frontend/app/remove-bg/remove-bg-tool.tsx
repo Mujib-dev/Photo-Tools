@@ -22,6 +22,7 @@ export function RemoveBgTool() {
         description="Cut the subject out of any photo with a neural network — transparent PNG, white or black background."
         submit={(file, s) => submitRemoveBg(file, s as RemoveBgSettings)}
         settings={settings}
+        setSettings={(s) => setSettings(s as RemoveBgSettings)}
         settingsPanel={() => <RemoveBgSettingsForm value={settings} onChange={setSettings} />}
       />
     </AuthGate>

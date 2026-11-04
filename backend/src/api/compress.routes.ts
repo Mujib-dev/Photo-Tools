@@ -41,6 +41,8 @@ export function compressRoutes(jobs: JobManager): Router {
       const baseName = sanitizeBaseName(req.file.originalname);
 
       const record = await jobs.createJob({
+
+        userId: req.authUser?.id ?? null,
         id: jobId,
         operation: "compress",
         inputFilename: req.file.originalname,

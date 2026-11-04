@@ -8,6 +8,9 @@ import type {
   CompressSettings,
   WatermarkSettings,
   VideoSettings,
+  UrlDownloadSettings,
+  AudioSettings,
+  OcrSettings,
 } from "../validation/validators.js";
 
 /**
@@ -26,7 +29,10 @@ export type ProcessingSettings =
   | RemoveBgSettings
   | CompressSettings
   | WatermarkSettings
-  | VideoSettings;
+  | VideoSettings
+  | UrlDownloadSettings
+  | AudioSettings
+  | OcrSettings;
 
 export interface ProcessingRequest {
   inputPath: string;
@@ -42,6 +48,18 @@ export interface ProcessingResult {
 }
 
 export interface ProcessingService {
-  readonly operation: "resize" | "convert" | "enhance" | "scan" | "pdf" | "removebg" | "compress" | "watermark" | "video";
+  readonly operation:
+    | "resize"
+    | "convert"
+    | "enhance"
+    | "scan"
+    | "pdf"
+    | "removebg"
+    | "compress"
+    | "watermark"
+    | "video"
+    | "fetch"
+    | "audio"
+    | "ocr";
   process(request: ProcessingRequest): Promise<ProcessingResult>;
 }

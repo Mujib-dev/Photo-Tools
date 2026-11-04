@@ -14,48 +14,72 @@ import {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: config.maxFileSizeBytes, files: 1, fields: 10 },
+  limits: { fileSize: config.maxFileSizeBytes, files: 2, fields: 10 },
 });
 
 export function watermarkRoutes(jobs: JobManager): Router {
   const router = Router();
 
-  router.post("/", upload.single("file"), async (req, res, next) => {
-    try {
-      if (!req.file || !req.file.buffer || req.file.size === 0) throw Errors.noFile();
-
-      const settingsRaw = req.body.settings ?? "{}";
-      let settings;
+  router.post(
+    "/",
+    upload.fields([
+      { name: "file", maxCount: 1 },
+      { name: "watermark", maxCount: 1 },
+    ]),
+    async (req, res, next) => {
       try {
-        settings = parseWatermarkSettings(
-          typeof settingsRaw === "string" ? JSON.parse(settingsRaw) : settingsRaw,
-        );
-      } catch (err) {
-        if (err instanceof Error && (err as { safe?: string }).safe) throw err;
-        throw Errors.invalidSettings("Settings must be valid JSON.");
-      }
+        const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+        const mainFile = files?.file?.[0] ?? req.file;
+        const watermarkFile = files?.watermark?.[0];
 
-      const format = detectImageFormat(req.file.buffer, req.file.originalname);
-      const { jobId, dirs } = await createJobDirectories();
-      const inputPath = await saveInputFile(dirs, req.file.buffer, formatExtension(format));
-      const baseName = sanitizeBaseName(req.file.originalname);
+        if (!mainFile || !mainFile.buffer || mainFile.size === 0) throw Errors.noFile();
 
-      const record = await jobs.createJob({
-        id: jobId,
-        operation: "watermark",
-        inputFilename: req.file.originalname,
-        inputSize: req.file.size,
-        inputFormat: format,
-        outputBaseName: `${baseName}-watermarked`,
-        settings,
-        dirs: { ...dirs, inputPath },
-      });
+        const settingsRaw = req.body.settings ?? "{}";
+        let settings;
+        try {
+          settings = parseWatermarkSettings(
+            typeof settingsRaw === "string" ? JSON.parse(settingsRaw) : settingsRaw,
+            Boolean(watermarkFile),
+          );
+        } catch (err) {
+          if (err instanceof Error && (err as { safe?: string }).safe) throw err;
+          throw Errors.invalidSettings("Settings must be valid JSON.");
+        }
 
-      res.status(202).json({
-        jobId: record.id,
-        status: record.state,
-        operation: record.operation,
-      });
+        const format = detectImageFormat(mainFile.buffer, mainFile.originalname);
+        const { jobId, dirs } = await createJobDirectories();
+        const inputPath = await saveInputFile(dirs, mainFile.buffer, formatExtension(format));
+        const baseName = sanitizeBaseName(mainFile.originalname);
+
+        if (watermarkFile && watermarkFile.buffer && watermarkFile.size > 0) {
+          const watermarkFormat = detectImageFormat(watermarkFile.buffer, watermarkFile.originalname);
+          const watermarkPath = await saveInputFile(
+            dirs,
+            watermarkFile.buffer,
+            `logo${formatExtension(watermarkFormat)}`,
+          );
+          settings.imageWatermarkPath = watermarkPath;
+          settings.watermarkType = "image";
+        }
+
+        const record = await jobs.createJob({
+
+          userId: req.authUser?.id ?? null,
+          id: jobId,
+          operation: "watermark",
+          inputFilename: mainFile.originalname,
+          inputSize: mainFile.size,
+          inputFormat: format,
+          outputBaseName: `${baseName}-watermarked`,
+          settings,
+          dirs: { ...dirs, inputPath },
+        });
+
+        res.status(202).json({
+          jobId: record.id,
+          status: record.state,
+          operation: record.operation,
+        });
     } catch (err) {
       next(err);
     }

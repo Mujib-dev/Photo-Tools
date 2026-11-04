@@ -41,6 +41,8 @@ export function removeBgRoutes(jobs: JobManager): Router {
       const baseName = sanitizeBaseName(req.file.originalname);
 
       const record = await jobs.createJob({
+
+        userId: req.authUser?.id ?? null,
         id: jobId,
         operation: "removebg",
         inputFilename: req.file.originalname,

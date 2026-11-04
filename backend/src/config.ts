@@ -41,10 +41,22 @@ function exePath(name: string): string | null {
   const raw = env[name];
   if (!raw) return null;
   const p = path.resolve(raw);
-  if (!existsSync(p) || !p.toLowerCase().endsWith(".exe")) {
-    throw new Error(`Invalid configuration: ${name} must point to an existing .exe file (got "${raw}").`);
+  const lower = p.toLowerCase();
+  if (!existsSync(p) || (!lower.endsWith(".exe") && !lower.endsWith(".py"))) {
+    throw new Error(`Invalid configuration: ${name} must point to an existing .exe or .py file (got "${raw}").`);
   }
   return p;
+}
+
+function resolveEngine(envVar: string, exeName: string, scriptName: string): string {
+  const custom = exePath(envVar);
+  if (custom) return custom;
+  const scriptPath = path.resolve(__dirname, `../../bin-src/${scriptName}`);
+  const exeCandidate = path.resolve(__dirname, `../../bin/${exeName}`);
+  if (env.PREFER_EXE !== "true" && existsSync(scriptPath)) {
+    return scriptPath;
+  }
+  return exeCandidate;
 }
 
 /**
@@ -81,19 +93,22 @@ export const config = {
   port: int("PORT", 4000),
 
   // Restrictive executable registry. Only these paths may ever be spawned.
-  resizerExe: exePath("PHOTO_RESIZER_EXE") ?? path.resolve(__dirname, "../../bin/PhotoResizer.exe"),
-  converterExe: exePath("PHOTO_CONVERTER_EXE") ?? path.resolve(__dirname, "../../bin/PhotoConverter.exe"),
-  enhancerExe: exePath("PHOTO_ENHANCER_EXE") ?? path.resolve(__dirname, "../../bin/PhotoEnhancer.exe"),
-  scannerExe: exePath("PHOTO_SCANNER_EXE") ?? path.resolve(__dirname, "../../bin/PhotoScanner.exe"),
-  pdfExe: exePath("PHOTO_PDF_EXE") ?? path.resolve(__dirname, "../../bin/PhotoPdf.exe"),
-  removeBgExe: exePath("PHOTO_REMOVEBG_EXE") ?? path.resolve(__dirname, "../../bin/PhotoRemoveBg.exe"),
-  compressExe: exePath("PHOTO_COMPRESS_EXE") ?? path.resolve(__dirname, "../../bin/PhotoCompress.exe"),
-  watermarkExe: exePath("PHOTO_WATERMARK_EXE") ?? path.resolve(__dirname, "../../bin/PhotoWatermark.exe"),
+  resizerExe: resolveEngine("PHOTO_RESIZER_EXE", "PhotoResizer.exe", "photo_resizer_cli.py"),
+  converterExe: resolveEngine("PHOTO_CONVERTER_EXE", "PhotoConverter.exe", "photo_converter_cli.py"),
+  enhancerExe: resolveEngine("PHOTO_ENHANCER_EXE", "PhotoEnhancer.exe", "photo_enhancer_cli.py"),
+  scannerExe: resolveEngine("PHOTO_SCANNER_EXE", "PhotoScanner.exe", "photo_scanner_cli.py"),
+  pdfExe: resolveEngine("PHOTO_PDF_EXE", "PhotoPdf.exe", "photo_pdf_cli.py"),
+  removeBgExe: resolveEngine("PHOTO_REMOVEBG_EXE", "PhotoRemoveBg.exe", "photo_removebg_cli.py"),
+  compressExe: resolveEngine("PHOTO_COMPRESS_EXE", "PhotoCompress.exe", "photo_compress_cli.py"),
+  watermarkExe: resolveEngine("PHOTO_WATERMARK_EXE", "PhotoWatermark.exe", "photo_watermark_cli.py"),
 
   // Video compression runs on a host-installed FFmpeg (no bundled engine). When
   // either binary is missing the /api/video endpoints return a friendly error.
   ffmpegExe: findExecutable(["PHOTO_FFMPEG_EXE", "FFMPEG_PATH"], "ffmpeg"),
   ffprobeExe: findExecutable(["PHOTO_FFPROBE_EXE", "FFPROBE_PATH"], "ffprobe"),
+  pythonExe: findExecutable(["PYTHON_EXE", "PYTHON_PATH"], "python"),
+  mediaExtractorScript: path.resolve(__dirname, "../../bin-src/media_extractor_cli.py"),
+  ocrExtractorScript: path.resolve(__dirname, "../../bin-src/ocr_extractor_cli.py"),
 
   tempDirectory: path.resolve(env.TEMP_DIRECTORY ?? path.resolve(__dirname, "../../temp")),
   maxFileSizeBytes: int("MAX_FILE_SIZE_MB", 50) * 1024 * 1024,
@@ -102,17 +117,72 @@ export const config = {
   scanProcessTimeoutMs: int("SCAN_PROCESS_TIMEOUT_SECONDS", 600) * 1000,
   videoProcessTimeoutMs: int("VIDEO_PROCESS_TIMEOUT_SECONDS", 1800) * 1000,
   maxConcurrentJobs: int("MAX_CONCURRENT_JOBS", 4),
-  jobRetentionMinutes: int("JOB_RETENTION_MINUTES", 15),
+  // Outputs must stay downloadable long enough for a user to return to them.
+  // 24h is the default; tune down for high-volume deployments.
+  jobRetentionMinutes: int("JOB_RETENTION_MINUTES", 1440),
   cleanupIntervalMs: int("CLEANUP_INTERVAL_MINUTES", 5) * 60 * 1000,
+
+  // URL downloader: direct media files and HLS (m3u8) manifests only. It never
+  // bypasses DRM, authentication, paywalls or other access controls.
+  urlDownloadEnabled: env.URL_DOWNLOAD_ENABLED !== "false",
+  urlDownloadMaxBytes: int("URL_DOWNLOAD_MAX_MB", 500) * 1024 * 1024,
+  urlDownloadTimeoutMs: int("URL_DOWNLOAD_TIMEOUT_SECONDS", 600) * 1000,
+  urlDownloadMaxRedirects: int("URL_DOWNLOAD_MAX_REDIRECTS", 5),
+  urlDownloadMaxPlaylistBytes: int("URL_DOWNLOAD_MAX_PLAYLIST_KB", 2048) * 1024,
+  urlDownloadMaxSegments: int("URL_DOWNLOAD_MAX_SEGMENTS", 5000),
+  // Allow loopback/private-network download targets. Off by default to prevent
+  // SSRF; enable (URL_DOWNLOAD_ALLOW_PRIVATE=true) only for local testing.
+  urlDownloadAllowPrivate: env.URL_DOWNLOAD_ALLOW_PRIVATE === "true",
 
   // Security
   apiKeys: (env.API_KEYS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
-  allowedOrigins: (env.FRONTEND_ORIGINS ?? "http://localhost:3000")
+  allowedOrigins: (env.FRONTEND_ORIGINS ?? "http://localhost:3000,http://127.0.0.1:3000")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),
   rateLimitWindowMs: int("RATE_LIMIT_WINDOW_SECONDS", 60) * 1000,
   rateLimitMax: int("RATE_LIMIT_MAX_REQUESTS", 30),
+
+  // Response security headers + transport security.
+  securityHeadersEnabled: env.SECURITY_HEADERS !== "false",
+  contentSecurityPolicy:
+    env.CONTENT_SECURITY_POLICY ??
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+  hstsMaxAgeSeconds: int("HSTS_MAX_AGE_SECONDS", 15552000),
+  hstsIncludeSubDomains: env.HSTS_INCLUDE_SUBDOMAINS === "true",
+  hstsPreload: env.HSTS_PRELOAD === "true",
+  // Reject plaintext HTTP. Enable behind a TLS-terminating proxy; `trust proxy`
+  // makes req.secure honour X-Forwarded-Proto.
+  requireHttps: env.REQUIRE_HTTPS === "true",
+
+  // Request hardening. `query parser` defaults to the simpler, safer parser to
+  // avoid the prototype-pollution surface of the extended (qs) parser.
+  trustProxy:
+    env.TRUST_PROXY === undefined
+      ? (env.NODE_ENV ?? "development") === "production"
+      : env.TRUST_PROXY === "true",
+  queryParser: (env.QUERY_PARSER ?? "simple").toLowerCase() === "extended" ? "extended" : "simple",
+  jsonBodyLimit: env.JSON_BODY_LIMIT ?? "1mb",
+  maxUrlLength: int("MAX_URL_LENGTH", 2048),
+  csrfProtectionEnabled: env.CSRF_PROTECTION !== "false",
+  requestLogging: env.REQUEST_LOGGING !== "false",
+
+  // Password policy applied to registration.
+  passwordMinLength: int("PASSWORD_MIN_LENGTH", 8),
+  passwordMaxLength: int("PASSWORD_MAX_LENGTH", 128),
+  passwordRequireComplexity: env.PASSWORD_REQUIRE_COMPLEXITY !== "false",
+  passwordBlocklistEnabled: env.PASSWORD_BLOCKLIST !== "false",
+
+  // Refresh-token theft detection: a valid-but-unrecognised refresh token
+  // (i.e. one replayed after rotation) revokes every session for that user.
+  refreshReuseRevokesFamily: env.AUTH_REFRESH_REUSE_REVOKE !== "false",
+
+  // When true (default in production) a failed startup security audit aborts
+  // boot rather than serving with a weak configuration.
+  securityStrict:
+    env.SECURITY_STRICT === undefined
+      ? (env.NODE_ENV ?? "development") === "production"
+      : env.SECURITY_STRICT === "true",
 
   // User accounts (login / signup). Processing endpoints are gated behind a
   // signed-in session when enabled. Set AUTH_ENABLED=false to run open.
@@ -142,9 +212,70 @@ export const config = {
   authRateLimitWindowMs: int("AUTH_RATE_LIMIT_WINDOW_SECONDS", 900) * 1000,
   authRateLimitMax: int("AUTH_RATE_LIMIT_MAX_ATTEMPTS", 5),
 
+  // Account recovery. Password-reset links point at the public web app and
+  // expire after a short window. Recovery mail is only actually delivered when
+  // SMTP is configured (see smtpHost below); otherwise it is logged so the
+  // stack still runs with no mail setup.
+  publicAppUrl: (env.PUBLIC_APP_URL ?? env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/+$/, ""),
+  passwordResetTtlMs: int("PASSWORD_RESET_TTL_MINUTES", 30) * 60 * 1000,
+  recoveryCodeTtlMs: int("RECOVERY_CODE_TTL_MINUTES", 10) * 60 * 1000,
+
+  // Recovery delivery channels: SMS and WhatsApp are sent through Twilio when
+  // credentials are configured; otherwise they are logged (development) so the
+  // stack still runs with no messaging provider.
+  twilioAccountSid: env.TWILIO_ACCOUNT_SID ?? null,
+  twilioAuthToken: env.TWILIO_AUTH_TOKEN ?? null,
+  smsFromNumber: env.SMS_FROM_NUMBER ?? env.TWILIO_FROM_NUMBER ?? null,
+  whatsappFromNumber: env.WHATSAPP_FROM_NUMBER ?? null,
+
+  // Paid plans via Stripe subscriptions. Checkout activates the plan when the
+  // browser returns with a session id; renewals, cancellations and failed
+  // payments arrive through STRIPE_WEBHOOK_SECRET (optional — without it the
+  // server still reconciles on each /api/credits access, just less promptly).
+  // Everything stays disabled until a secret key and both price IDs are set.
+  stripeSecretKey: (env.STRIPE_SECRET_KEY ?? "").trim() || null,
+  stripePricePro: (env.STRIPE_PRICE_PRO ?? "").trim() || null,
+  stripePriceBusiness: (env.STRIPE_PRICE_BUSINESS ?? "").trim() || null,
+  // Yearly Stripe prices. Optional: a tier without an annual price simply
+  // isn't offered on annual billing until one is configured.
+  stripePriceProAnnual: (env.STRIPE_PRICE_PRO_ANNUAL ?? "").trim() || null,
+  stripePriceBusinessAnnual: (env.STRIPE_PRICE_BUSINESS_ANNUAL ?? "").trim() || null,
+  stripeWebhookSecret: (env.STRIPE_WEBHOOK_SECRET ?? "").trim() || null,
+
+  // Pakistan local payment methods (JazzCash, EasyPaisa, Direct Bank Transfer / Raast)
+  jazzcashAccountTitle: (env.JAZZCASH_ACCOUNT_TITLE ?? "PicTools Official / Mujib Ur Rahman").trim(),
+  jazzcashAccountNumber: (env.JAZZCASH_ACCOUNT_NUMBER ?? "0300-1234567").trim(),
+  jazzcashTillId: (env.JAZZCASH_TILL_ID ?? "00192834").trim(),
+
+  easypaisaAccountTitle: (env.EASYPAISA_ACCOUNT_TITLE ?? "PicTools Official / Mujib Ur Rahman").trim(),
+  easypaisaAccountNumber: (env.EASYPAISA_ACCOUNT_NUMBER ?? "0345-1234567").trim(),
+
+  bankName: (env.BANK_NAME ?? "Meezan Bank Ltd").trim(),
+  bankAccountTitle: (env.BANK_ACCOUNT_TITLE ?? "PicTools Technologies").trim(),
+  bankAccountNumber: (env.BANK_ACCOUNT_NUMBER ?? "01010102938475").trim(),
+  bankIban: (env.BANK_IBAN ?? "PK82MEZN0001010102938475").trim(),
+  bankRaastId: (env.BANK_RAAST_ID ?? "03001234567").trim(),
+
+  // Social sign-in. When GOOGLE_CLIENT_ID is set, the frontend can obtain a
+  // Google ID token and exchange it at /api/auth/google for a session.
+  // GOOGLE_CLIENT_IDS accepts a comma-separated list so the same backend can
+  // verify tokens from web, Android and iOS OAuth clients (each is a distinct
+  // audience). GOOGLE_CLIENT_ID remains the single-value web client.
+  googleClientId: (env.GOOGLE_CLIENT_ID ?? "").trim(),
+  googleClientIds: (
+    env.GOOGLE_CLIENT_IDS ??
+    env.GOOGLE_CLIENT_ID ??
+    ""
+  )
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+
   // Default demo account, seeded on first startup when absent.
   defaultUserEmail: (env.DEFAULT_USER_EMAIL ?? "demo@pic.tools").trim().toLowerCase(),
   defaultUserPassword: env.DEFAULT_USER_PASSWORD ?? "password123",
+  // Grant the seeded default account administrator rights (and keep it admin).
+  defaultUserIsAdmin: env.DEFAULT_USER_IS_ADMIN !== "false",
 
   // Outbound email for the contact form. Optional: when SMTP_HOST is unset the
   // submission is logged instead of emailed, so the stack runs with no mail setup.

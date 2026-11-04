@@ -133,6 +133,74 @@ export function EnhanceSettingsForm({ value, onChange }: Props) {
             brightness and light denoise. Toggle off for full manual control.
           </p>
         )}
+
+        {/* AI Face Detail Restorer */}
+        <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-3.5 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="font-display text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <span>👤</span> AI Face Detail Restorer
+            </span>
+            <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/30">
+              Neural Portrait
+            </span>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            De-blurs old vintage family photos, specifically sharpening facial features, iris details, eyelashes, and hair textures.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              onChange({
+                ...value,
+                auto: false,
+                aiUpscale: 2,
+                scale: 2,
+                sharpness: 1.45,
+                contrast: 1.12,
+                saturation: 1.06,
+                brightness: 1.02,
+                denoise: 1,
+              });
+            }}
+            className="w-full py-1.5 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs transition-colors flex items-center justify-center gap-1.5"
+          >
+            Load Face Restoration Recipe (2× AI)
+          </button>
+        </div>
+
+        {/* AI Landscape & HDR Clarity Recipe */}
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3.5 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="font-display text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <span>🏞️</span> AI Landscape & Architectural HDR
+            </span>
+            <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/30">
+              Vivid Clarity
+            </span>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Enhances foliage greens, sky blues, textural micro-contrast, and dynamic shadow detail in travel, landscape, and real estate exterior photos.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              onChange({
+                ...value,
+                auto: false,
+                aiUpscale: 2,
+                scale: 2,
+                sharpness: 1.35,
+                contrast: 1.18,
+                saturation: 1.15,
+                brightness: 1.04,
+                denoise: 1,
+              });
+            }}
+            className="w-full py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs transition-colors flex items-center justify-center gap-1.5"
+          >
+            Load Landscape & HDR Recipe (2× AI)
+          </button>
+        </div>
       </div>
 
       {/* Selective area */}

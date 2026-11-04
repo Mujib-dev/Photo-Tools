@@ -7,9 +7,9 @@ pushd "%~dp0"
 
 set "MODE=%~1"
 if "%MODE%"=="" set "MODE=dev"
-if /i not "%MODE%"=="dev" if /i not "%MODE%"=="start" if /i not "%MODE%"=="build" (
+if /i not "%MODE%"=="dev" if /i not "%MODE%"=="start" if /i not "%MODE%"=="build" if /i not "%MODE%"=="mobile" if /i not "%MODE%"=="app" if /i not "%MODE%"=="all" (
     echo [ERROR] Unknown mode "%MODE%".
-    echo         Usage: run.bat [dev^|start^|build]
+    echo         Usage: run.bat [dev^|app^|all^|start^|build^|mobile]
     popd
     exit /b 1
 )
@@ -57,8 +57,14 @@ echo.
 
 if /i "%MODE%"=="dev" (
     call npm run dev
+) else if /i "%MODE%"=="app" (
+    call npm run dev:app
+) else if /i "%MODE%"=="all" (
+    call npm run dev:all
 ) else if /i "%MODE%"=="start" (
     call npm run start
+) else if /i "%MODE%"=="mobile" (
+    call npm --prefix mobile run start
 ) else (
     call npm run build
 )

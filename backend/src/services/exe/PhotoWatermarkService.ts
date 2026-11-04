@@ -21,26 +21,31 @@ export class ExeWatermarkService implements ProcessingService {
     const ext = settings.format === "jpeg" ? "jpg" : settings.format;
     const outputPath = path.join(request.outputDir, `${request.outputBaseName}.${ext}`);
 
-    const result = await this.runner.run("watermark", {
-      args: [
-        "--input",
-        request.inputPath,
-        "--output",
-        outputPath,
-        "--text",
-        settings.text,
-        "--position",
-        settings.position,
-        "--opacity",
-        String(settings.opacity),
-        "--size",
-        String(settings.size),
-        "--color",
-        settings.color,
-        "--format",
-        settings.format,
-      ],
-    });
+    const args = [
+      "--input",
+      request.inputPath,
+      "--output",
+      outputPath,
+      "--position",
+      settings.position,
+      "--opacity",
+      String(settings.opacity),
+      "--size",
+      String(settings.size),
+      "--color",
+      settings.color,
+      "--format",
+      ext,
+    ];
+
+    if (settings.imageWatermarkPath) {
+      args.push("--image-watermark", settings.imageWatermarkPath);
+    }
+    if (settings.text) {
+      args.push("--text", settings.text);
+    }
+
+    const result = await this.runner.run("watermark", { args });
 
     if (result.timedOut) {
       logger.error("PhotoWatermark timed out", { input: request.inputPath });

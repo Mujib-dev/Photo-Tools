@@ -331,7 +331,7 @@ export function CollageTool() {
                         size="icon"
                         variant="ghost"
                         aria-label="Move up"
-                        className="h-8 w-8"
+                        className="h-10 w-10"
                         disabled={index === 0}
                         onClick={() => move(index, -1)}
                       >
@@ -341,7 +341,7 @@ export function CollageTool() {
                         size="icon"
                         variant="ghost"
                         aria-label="Move down"
-                        className="h-8 w-8"
+                        className="h-10 w-10"
                         disabled={index === items.length - 1}
                         onClick={() => move(index, 1)}
                       >
@@ -351,7 +351,7 @@ export function CollageTool() {
                         size="icon"
                         variant="ghost"
                         aria-label={`Remove ${item.file.name}`}
-                        className="h-8 w-8"
+                        className="h-10 w-10"
                         onClick={() => removeItem(item.key)}
                       >
                         <Trash2 className="h-4 w-4 text-on-surface-variant" />

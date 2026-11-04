@@ -73,6 +73,36 @@ export const ADJUST_PRESETS: AdjustPreset[] = [
     label: "Vintage",
     values: { brightness: 3, contrast: 6, saturation: -22, warmth: 40, hue: -6, vignette: 30 },
   },
+  {
+    id: "golden-hour",
+    label: "Golden Hour",
+    values: { brightness: 8, contrast: 14, saturation: 24, warmth: 45, hue: -4, vignette: 16 },
+  },
+  {
+    id: "cinematic",
+    label: "Cinematic",
+    values: { brightness: -2, contrast: 26, saturation: -8, warmth: -15, hue: 12, vignette: 28 },
+  },
+  {
+    id: "cyberpunk",
+    label: "Cyberpunk",
+    values: { brightness: 6, contrast: 32, saturation: 42, warmth: -40, hue: 45, vignette: 22 },
+  },
+  {
+    id: "portrait",
+    label: "Portrait Glow",
+    values: { brightness: 10, contrast: 10, saturation: 8, warmth: 14, hue: 0, vignette: 6 },
+  },
+  {
+    id: "moody-forest",
+    label: "Moody",
+    values: { brightness: -8, contrast: 22, saturation: 14, warmth: -25, hue: -12, vignette: 32 },
+  },
+  {
+    id: "matte-pastel",
+    label: "Pastel Matte",
+    values: { brightness: 14, contrast: -20, saturation: 18, warmth: 16, hue: 6, vignette: 8 },
+  },
 ];
 
 function percentile(hist: number[], fraction: number): number {

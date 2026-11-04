@@ -1,11 +1,5 @@
-import type { Metadata } from "next";
-import { EnhanceTool } from "./enhance-tool";
-
-export const metadata: Metadata = {
-  title: "Enhance Photo",
-  description: "Enhance your photos automatically or with fine manual control.",
-};
+import { redirect } from "next/navigation";
 
 export default function EnhancePage() {
-  return <EnhanceTool />;
+  redirect("/upscale");
 }

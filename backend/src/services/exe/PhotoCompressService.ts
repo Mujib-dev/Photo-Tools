@@ -19,7 +19,7 @@ export class ExeCompressService implements ProcessingService {
 
   async process(request: ProcessingRequest): Promise<ProcessingResult> {
     const settings = request.settings as CompressSettings;
-    const ext = settings.format === "keep" ? "auto" : settings.format;
+    const format = settings.format || "keep";
     const outputPath = path.join(request.outputDir, `${request.outputBaseName}.out`);
 
     const result = await this.runner.run("compress", {
@@ -31,7 +31,7 @@ export class ExeCompressService implements ProcessingService {
         "--target-kb",
         String(settings.targetKb),
         "--format",
-        ext,
+        format,
       ],
       timeoutMs: 300_000,
     });

@@ -79,6 +79,8 @@ export function videoRoutes(jobs: JobManager): Router {
         settings.output === "audio" ? "audio" : settings.output === "frames" ? "frames" : "compressed";
 
       const record = await jobs.createJob({
+
+        userId: req.authUser?.id ?? null,
         id: jobId,
         operation: "video",
         inputFilename: req.file.originalname,

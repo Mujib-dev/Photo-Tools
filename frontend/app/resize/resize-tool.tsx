@@ -25,6 +25,7 @@ export function ResizeTool() {
         description="Resize your photos to any dimensions while maintaining quality."
         submit={(file, s) => submitResize(file, s as ResizeSettings)}
         settings={settings}
+        setSettings={(s) => setSettings(s as ResizeSettings)}
         settingsPanel={() => <ResizeSettingsForm value={settings} onChange={setSettings} />}
       />
     </AuthGate>

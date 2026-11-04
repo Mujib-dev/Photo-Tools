@@ -104,7 +104,7 @@ export function useZoomPan(resetKey?: unknown): ZoomPan {
   };
 
   const viewportStyle: React.CSSProperties = {
-    cursor: zoom > 1 ? (dragging ? "grabbing" : "grab") : "default",
+    cursor: zoom > 1 ? (dragging ? "grabbing" : "grab") : "zoom-in",
     touchAction: "none",
   };
 

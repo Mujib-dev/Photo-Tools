@@ -29,6 +29,8 @@ const config: Config = {
           container: "hsl(var(--primary-container))",
           "on-container": "hsl(var(--on-primary-container))",
         },
+        "on-primary": "hsl(var(--primary-foreground))",
+        "on-primary-container": "hsl(var(--on-primary-container))",
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
           foreground: "hsl(var(--secondary-foreground))",
@@ -49,6 +51,7 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        surface: "hsl(var(--surface))",
         popover: {
           DEFAULT: "hsl(var(--popover))",
           foreground: "hsl(var(--popover-foreground))",

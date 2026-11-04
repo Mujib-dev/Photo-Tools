@@ -5,12 +5,14 @@ import {
   ArrowLeft,
   ArrowRight,
   FileCheck2,
+  GripVertical,
   Highlighter,
   Image as ImageIcon,
   Loader2,
   Maximize2,
   Minus,
   PencilLine,
+  PenTool,
   Plus,
   Redo2,
   RotateCcw,
@@ -25,6 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SignatureModal } from "./signature-modal";
 import { pdfPreviewUrl, previewPdf } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type {
@@ -133,6 +136,13 @@ export function PdfEditor({ file, onApply, running = false }: PdfEditorProps) {
   const [font, setFont] = React.useState<PdfEditFont>("helv");
   const [fontSize, setFontSize] = React.useState(18);
   const [draft, setDraft] = React.useState<[number, number][] | null>(null);
+  const [showSignatureModal, setShowSignatureModal] = React.useState(false);
+  const [dragAnnotation, setDragAnnotation] = React.useState<{
+    index: number;
+    startX: number;
+    startY: number;
+    pointerStart: [number, number];
+  } | null>(null);
 
   // --- view -------------------------------------------------------------
   const [zoom, setZoom] = React.useState(100);
@@ -239,6 +249,9 @@ export function PdfEditor({ file, onApply, running = false }: PdfEditorProps) {
     if (activeId === id) setActiveId(null);
   };
 
+  const [draggedId, setDraggedId] = React.useState<string | null>(null);
+  const [dragOverId, setDragOverId] = React.useState<string | null>(null);
+
   const movePage = (id: string, delta: number) => {
     const index = pages.findIndex((entry) => entry.id === id);
     const target = index + delta;
@@ -248,6 +261,20 @@ export function PdfEditor({ file, onApply, running = false }: PdfEditorProps) {
       const next = [...prev];
       const [moved] = next.splice(index, 1);
       next.splice(target, 0, moved);
+      return next;
+    });
+  };
+
+  const reorderPages = (sourceId: string, targetId: string) => {
+    if (sourceId === targetId) return;
+    const sourceIndex = pages.findIndex((entry) => entry.id === sourceId);
+    const targetIndex = pages.findIndex((entry) => entry.id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    commit();
+    setPages((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, moved);
       return next;
     });
   };
@@ -347,6 +374,29 @@ export function PdfEditor({ file, onApply, running = false }: PdfEditorProps) {
         ...prev,
         { kind: "image", pageId: active.id, x: point[0], y: point[1], w, h: w * ratio, asset: asset.name },
       ]);
+      URL.revokeObjectURL(url);
+    };
+    probe.onerror = () => URL.revokeObjectURL(url);
+    probe.src = url;
+  };
+
+  const handleInsertSignature = (sigFile: File) => {
+    if (!page || !active) return;
+    setAssets((prev) => [...prev, sigFile]);
+    const w = Math.min(220, page.width * 0.35);
+    const url = URL.createObjectURL(sigFile);
+    const probe = new Image();
+    probe.onload = () => {
+      const ratio = probe.naturalHeight / (probe.naturalWidth || 1) || 0.4;
+      const h = w * ratio;
+      const x = (page.width - w) / 2;
+      const y = Math.max(20, page.height * 0.75 - h / 2);
+      commit();
+      setAnnotations((prev) => [
+        ...prev,
+        { kind: "image", pageId: active.id, x, y, w, h, asset: sigFile.name },
+      ]);
+      setSelected(annotations.length);
       URL.revokeObjectURL(url);
     };
     probe.onerror = () => URL.revokeObjectURL(url);
@@ -539,6 +589,18 @@ export function PdfEditor({ file, onApply, running = false }: PdfEditorProps) {
         >
           <ImageIcon className="h-3.5 w-3.5" />
           Image
+        </Button>
+
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setShowSignatureModal(true)}
+          className="gap-1.5 border-primary/40 text-primary hover:bg-primary/10 font-medium"
+          title="Draw, type, or upload your digital signature"
+        >
+          <PenTool className="h-3.5 w-3.5" />
+          Sign Document
         </Button>
 
         <Button
@@ -738,53 +800,89 @@ export function PdfEditor({ file, onApply, running = false }: PdfEditorProps) {
       <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-3">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="font-display text-sm font-semibold">Pages ({pages.length})</h3>
-          <p className="text-xs text-on-surface-variant">Reorder, rotate or delete — changes apply on save.</p>
+          <p className="text-xs text-on-surface-variant">Drag cards to reorder, or use buttons to rotate and delete.</p>
         </div>
         <div className="flex gap-3 overflow-x-auto pb-2">
           {pages.map((entry, index) => {
             const info = preview.pages[entry.src];
             if (!info) return null;
             const isActive = entry.id === active.id;
+            const isDragging = draggedId === entry.id;
+            const isOver = dragOverId === entry.id && !isDragging;
             const portrait = info.height >= info.width;
             return (
               <div
                 key={entry.id}
+                draggable={true}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("text/plain", entry.id);
+                  e.dataTransfer.effectAllowed = "move";
+                  setDraggedId(entry.id);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (dragOverId !== entry.id) setDragOverId(entry.id);
+                }}
+                onDragLeave={() => {
+                  if (dragOverId === entry.id) setDragOverId(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const sourceId = e.dataTransfer.getData("text/plain") || draggedId;
+                  if (sourceId) reorderPages(sourceId, entry.id);
+                  setDraggedId(null);
+                  setDragOverId(null);
+                }}
+                onDragEnd={() => {
+                  setDraggedId(null);
+                  setDragOverId(null);
+                }}
                 className={cn(
-                  "relative shrink-0 cursor-pointer rounded-xl border-2 p-1.5 transition-colors",
+                  "relative shrink-0 cursor-grab active:cursor-grabbing rounded-xl border-2 p-1.5 transition-all select-none",
                   isActive ? "border-primary bg-primary/5" : "border-outline-variant/20 hover:border-primary/40",
+                  isDragging && "opacity-40 scale-95 ring-2 ring-primary/40",
+                  isOver && "border-primary ring-2 ring-primary/50 scale-105 shadow-md",
                 )}
                 onClick={() => {
                   setActiveId(entry.id);
                   setSelected(null);
                 }}
               >
+                <div className="mb-1 flex items-center justify-between text-on-surface-variant/70">
+                  <span className="flex items-center gap-0.5 font-mono text-[10px] font-semibold">
+                    <GripVertical className="h-3 w-3" />
+                    {index + 1}
+                  </span>
+                  {entry.rotate ? (
+                    <span className="font-mono text-[10px] font-medium text-primary">
+                      {entry.rotate}°
+                    </span>
+                  ) : null}
+                </div>
                 <div
-                  className="overflow-hidden rounded-md bg-white"
+                  className="overflow-hidden rounded-md bg-white shadow-xs"
                   style={{ width: portrait ? 64 : 84, height: portrait ? 84 : 64 }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={pdfPreviewUrl(preview, entry.src + 1)}
                     alt={`Page ${index + 1}`}
-                    className="h-full w-full object-contain transition-transform duration-200"
+                    className="h-full w-full object-contain transition-transform duration-200 pointer-events-none"
                     style={{ transform: `rotate(${entry.rotate}deg)` }}
                   />
                 </div>
-                <p className="mt-1 text-center font-mono text-[11px] text-on-surface-variant">
-                  {index + 1}
-                  {entry.rotate ? ` · ${entry.rotate}°` : ""}
-                </p>
-                <div className="mt-1 flex justify-center gap-0.5">
-                  <button type="button" title="Move left" aria-label="Move page left" onClick={(e) => { e.stopPropagation(); movePage(entry.id, -1); }} className="rounded p-0.5 text-on-surface-variant hover:text-primary">
+                <div className="mt-1.5 flex justify-center gap-0.5">
+                  <button type="button" title="Move left" aria-label="Move page left" onClick={(e) => { e.stopPropagation(); movePage(entry.id, -1); }} className="flex h-9 w-9 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <ArrowLeft className="h-3 w-3" />
                   </button>
-                  <button type="button" title="Rotate left" aria-label="Rotate page left" onClick={(e) => { e.stopPropagation(); rotatePage(entry.id, -90); }} className="rounded p-0.5 text-on-surface-variant hover:text-primary">
+                  <button type="button" title="Rotate left" aria-label="Rotate page left" onClick={(e) => { e.stopPropagation(); rotatePage(entry.id, -90); }} className="flex h-9 w-9 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <RotateCcw className="h-3 w-3" />
                   </button>
-                  <button type="button" title="Rotate right" aria-label="Rotate page right" onClick={(e) => { e.stopPropagation(); rotatePage(entry.id, 90); }} className="rounded p-0.5 text-on-surface-variant hover:text-primary">
+                  <button type="button" title="Rotate right" aria-label="Rotate page right" onClick={(e) => { e.stopPropagation(); rotatePage(entry.id, 90); }} className="flex h-9 w-9 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <RotateCw className="h-3 w-3" />
                   </button>
-                  <button type="button" title="Move right" aria-label="Move page right" onClick={(e) => { e.stopPropagation(); movePage(entry.id, 1); }} className="rounded p-0.5 text-on-surface-variant hover:text-primary">
+                  <button type="button" title="Move right" aria-label="Move page right" onClick={(e) => { e.stopPropagation(); movePage(entry.id, 1); }} className="flex h-9 w-9 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <ArrowRight className="h-3 w-3" />
                   </button>
                   <button
@@ -793,7 +891,7 @@ export function PdfEditor({ file, onApply, running = false }: PdfEditorProps) {
                     aria-label="Delete page"
                     onClick={(e) => { e.stopPropagation(); deletePage(entry.id); }}
                     disabled={pages.length <= 1}
-                    className="rounded p-0.5 text-on-surface-variant hover:text-destructive disabled:opacity-30"
+                    className="flex h-9 w-9 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-muted hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
@@ -1072,17 +1170,71 @@ export function PdfEditor({ file, onApply, running = false }: PdfEditorProps) {
               if (ann.kind === "image") {
                 const url = assetUrls.get(ann.asset);
                 if (!url) return null;
+                const isSelected = selected === index;
                 return (
-                  <image
+                  <g
                     key={index}
-                    href={url}
-                    x={ann.x}
-                    y={ann.y}
-                    width={ann.w}
-                    height={ann.h}
-                    onClick={() => setSelected(index)}
-                    style={{ cursor: "pointer" }}
-                  />
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setSelected(index);
+                      const pt = toPoints(e);
+                      if (pt) {
+                        setDragAnnotation({
+                          index,
+                          startX: ann.x,
+                          startY: ann.y,
+                          pointerStart: pt,
+                        });
+                        (e.currentTarget as SVGGElement).setPointerCapture?.(e.pointerId);
+                      }
+                    }}
+                    onPointerMove={(e) => {
+                      if (!dragAnnotation || dragAnnotation.index !== index) return;
+                      const pt = toPoints(e);
+                      if (!pt) return;
+                      const dx = pt[0] - dragAnnotation.pointerStart[0];
+                      const dy = pt[1] - dragAnnotation.pointerStart[1];
+                      setAnnotations((prev) =>
+                        prev.map((a, i) =>
+                          i === index && a.kind === "image"
+                            ? {
+                                ...a,
+                                x: Math.max(0, Math.min(page.width - a.w, dragAnnotation.startX + dx)),
+                                y: Math.max(0, Math.min(page.height - a.h, dragAnnotation.startY + dy)),
+                              }
+                            : a,
+                        ),
+                      );
+                    }}
+                    onPointerUp={() => {
+                      if (dragAnnotation && dragAnnotation.index === index) {
+                        commit();
+                        setDragAnnotation(null);
+                      }
+                    }}
+                    style={{ cursor: "move" }}
+                  >
+                    <image
+                      href={url}
+                      x={ann.x}
+                      y={ann.y}
+                      width={ann.w}
+                      height={ann.h}
+                    />
+                    {isSelected && (
+                      <rect
+                        x={ann.x - 2}
+                        y={ann.y - 2}
+                        width={ann.w + 4}
+                        height={ann.h + 4}
+                        fill="none"
+                        stroke="#2563eb"
+                        strokeWidth={1.5}
+                        strokeDasharray="4 2"
+                        pointerEvents="none"
+                      />
+                    )}
+                  </g>
                 );
               }
               return (
@@ -1145,6 +1297,12 @@ export function PdfEditor({ file, onApply, running = false }: PdfEditorProps) {
         )}
         Apply edits and save
       </Button>
+
+      <SignatureModal
+        open={showSignatureModal}
+        onClose={() => setShowSignatureModal(false)}
+        onSave={handleInsertSignature}
+      />
     </div>
   );
 }

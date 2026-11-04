@@ -6,7 +6,14 @@
     "build": "npm run build -w backend && npm run build -w frontend",
     "start": "concurrently --names BE,FE --prefix-colors magenta,cyan \"npm start -w backend\" \"npm start -w frontend\"",
     "test": "npm test -w backend",
-    "typecheck": "npm run typecheck -w backend"
+    "lint": "npm run lint -w frontend",
+    "typecheck": "npm run typecheck -w backend && npm run typecheck -w frontend",
+    "build:engines": "powershell -NoProfile -ExecutionPolicy Bypass -File bin-src/build-engines.ps1",
+    "dev:mobile": "npm --prefix mobile run start",
+    "dev:app": "concurrently --names BE,APP --prefix-colors magenta,green \"npm run dev -w backend\" \"npm --prefix mobile run start\"",
+    "dev:all": "concurrently --names BE,FE,APP --prefix-colors magenta,cyan,green \"npm run dev -w backend\" \"npm run dev -w frontend\" \"npm --prefix mobile run start\"",
+    "mobile:android": "npm --prefix mobile run android",
+    "mobile:ios": "npm --prefix mobile run ios"
   },
   "workspaces": [
     "backend",

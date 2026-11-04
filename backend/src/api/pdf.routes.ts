@@ -49,6 +49,8 @@ const OUTPUT_BASE: Record<string, string> = {
   split: "split",
   tojpg: "pages",
   edit: "edited",
+  compress: "compressed",
+  img2pdf: "document",
 };
 
 const IMAGE_MIME: Record<string, string> = {
@@ -143,7 +145,13 @@ export function pdfRoutes(jobs: JobManager, runner?: ExeProcessRunner): Router {
         throw Errors.invalidSettings("Invalid preview reference.");
       }
       const dirs = resolveJobDirectories(token);
-      const imagePath = path.join(dirs.outputDir, "preview", file);
+      const previewDir = path.join(dirs.outputDir, "preview");
+      const imagePath = path.join(previewDir, file);
+      const resolvedPreviewDir = path.resolve(previewDir).toLowerCase();
+      const resolvedImagePath = path.resolve(imagePath).toLowerCase();
+      if (path.dirname(resolvedImagePath) !== resolvedPreviewDir) {
+        throw Errors.invalidSettings("Invalid preview reference.");
+      }
       if (!existsSync(imagePath)) throw Errors.downloadGone();
       res.setHeader("Content-Type", "image/jpeg");
       res.setHeader("Cache-Control", "private, max-age=600");
@@ -158,25 +166,32 @@ export function pdfRoutes(jobs: JobManager, runner?: ExeProcessRunner): Router {
       const files = req.files as Express.Multer.File[] | undefined;
       if (!files || files.length === 0) throw Errors.noFile();
       const settings = parsePdfSettings(parseJsonField(req.body.settings, null));
+      const isImg2Pdf = settings.op === "img2pdf";
 
-      // For "edit" the first file is the document and the rest are overlay
-      // images; every other op takes PDFs only.
-      const [document, ...rest] = files;
-      if (!document.buffer || document.size === 0 || !looksLikePdf(document.buffer)) {
-        throw Errors.invalidSettings("Please upload valid PDF files.");
-      }
-
-      if (settings.op === "edit") {
-        // Overlay images are resolved by the service via the asset name.
+      if (isImg2Pdf) {
+        if (files.some((f) => !f.buffer || f.size === 0)) {
+          throw Errors.invalidSettings("Please upload valid image files.");
+        }
       } else {
-        if (rest.some((f) => !f.buffer || f.size === 0 || !looksLikePdf(f.buffer))) {
+        // For "edit" the first file is the document and the rest are overlay
+        // images; every other op takes PDFs only.
+        const [document, ...rest] = files;
+        if (!document.buffer || document.size === 0 || !looksLikePdf(document.buffer)) {
           throw Errors.invalidSettings("Please upload valid PDF files.");
         }
-        if (settings.op === "merge" && files.length < 2) {
-          throw Errors.invalidSettings("Merging requires at least two PDF files.");
-        }
-        if (settings.op !== "merge" && files.length > 1) {
-          throw Errors.invalidSettings(`"${settings.op}" processes one PDF at a time.`);
+
+        if (settings.op === "edit") {
+          // Overlay images are resolved by the service via the asset name.
+        } else {
+          if (rest.some((f) => !f.buffer || f.size === 0 || !looksLikePdf(f.buffer))) {
+            throw Errors.invalidSettings("Please upload valid PDF files.");
+          }
+          if (settings.op === "merge" && files.length < 2) {
+            throw Errors.invalidSettings("Merging requires at least two PDF files.");
+          }
+          if (settings.op !== "merge" && files.length > 1) {
+            throw Errors.invalidSettings(`"${settings.op}" processes one PDF at a time.`);
+          }
         }
       }
 
@@ -184,21 +199,30 @@ export function pdfRoutes(jobs: JobManager, runner?: ExeProcessRunner): Router {
       const inputFiles: string[] = [];
       let totalSize = 0;
 
-      // Save the document, then any overlay images. Asset names in the plan are
-      // rewritten to the on-disk names so the service can resolve them safely.
+      // Save inputs. For img2pdf, save each image. For edit, save document then overlays.
       const assetMap = new Map<string, string>();
-      for (const [index, file] of files.entries()) {
-        const isDocument = index === 0;
-        const ext = isDocument ? ".pdf" : imageExtension(file);
-        if (!isDocument && !ext) {
-          await deleteJobDirectory(jobId);
-          throw Errors.invalidSettings("Overlay files must be PDF-page images.");
+      if (isImg2Pdf) {
+        for (const file of files) {
+          const rawExt = path.extname(file.originalname).toLowerCase();
+          const ext = [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"].includes(rawExt) ? rawExt : ".jpg";
+          const inputPath = await saveInputFile(dirs, file.buffer, ext);
+          inputFiles.push(path.basename(inputPath));
+          totalSize += file.size;
         }
-        const inputPath = await saveInputFile(dirs, file.buffer, ext ?? ".pdf");
-        const savedName = path.basename(inputPath);
-        if (!isDocument) assetMap.set(file.originalname, savedName);
-        inputFiles.push(savedName);
-        totalSize += file.size;
+      } else {
+        for (const [index, file] of files.entries()) {
+          const isDocument = index === 0;
+          const ext = isDocument ? ".pdf" : imageExtension(file);
+          if (!isDocument && !ext) {
+            await deleteJobDirectory(jobId);
+            throw Errors.invalidSettings("Overlay files must be PDF-page images.");
+          }
+          const inputPath = await saveInputFile(dirs, file.buffer, ext ?? ".pdf");
+          const savedName = path.basename(inputPath);
+          if (!isDocument) assetMap.set(file.originalname, savedName);
+          inputFiles.push(savedName);
+          totalSize += file.size;
+        }
       }
 
       const plan =
@@ -212,6 +236,8 @@ export function pdfRoutes(jobs: JobManager, runner?: ExeProcessRunner): Router {
           : settings.plan;
 
       const record = await jobs.createJob({
+
+        userId: req.authUser?.id ?? null,
         id: jobId,
         operation: "pdf",
         inputFilename: files.length === 1 ? files[0].originalname : `${files.length} documents`,

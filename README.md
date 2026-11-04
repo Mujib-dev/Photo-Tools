@@ -30,8 +30,9 @@ drive them as processing engines.
 - Multi-file drag-and-drop upload with live progress, per-file download and a
   combined "Download all" ZIP.
 - **Accounts** — sign up / log in; processing endpoints are gated behind a
-  signed-in session (sessions stored hashed in SQLite, passwords hashed with
-  scrypt). Disable with `AUTH_ENABLED=false`.
+  signed-in user (short-lived JWT access tokens with rotating refresh tokens,
+  refresh tokens stored hashed in SQLite, passwords hashed with scrypt; login
+  attempts are rate-limited). Disable with `AUTH_ENABLED=false`.
 - Dark/light theme, mobile-responsive UI.
 - Job queue with persistence: jobs survive restarts, statuses are polled live.
 
@@ -85,11 +86,16 @@ All configuration lives in `photo-tools/.env` (see `.env.example` for
 descriptions). Key items:
 
 - `PHOTO_RESIZER_EXE` / `PHOTO_CONVERTER_EXE` — absolute paths to the engines.
-- `AUTH_ENABLED` (default `true`) — require a signed-in session to process
-  images. Set to `false` to run open. `AUTH_STORE` (`sqlite` | `memory`),
-  `SESSION_TTL_DAYS` (default 7). A demo account is created on first startup:
-  `demo@pic.tools` / `password123` (override with `DEFAULT_USER_EMAIL` /
-  `DEFAULT_USER_PASSWORD`).
+- `AUTH_ENABLED` (default `true`) — require a signed-in user to process
+  images. Set to `false` to run open. `AUTH_STORE` (`sqlite` | `memory`).
+  Auth uses JWT access tokens (`ACCESS_TOKEN_TTL_MINUTES`, default 15) plus
+  rotating refresh tokens (`REFRESH_TOKEN_TTL_DAYS`, default 7); set
+  `JWT_SECRET` outside localhost so sessions survive restarts. Login/register
+  is throttled with `AUTH_RATE_LIMIT_MAX_ATTEMPTS` (default 5) per
+  `AUTH_RATE_LIMIT_WINDOW_SECONDS` (default 900) per IP+email. Legacy sessions
+  stay valid for `SESSION_TTL_DAYS` (default 7). A demo account is created on
+  first startup: `demo@pic.tools` / `password123` (override with
+  `DEFAULT_USER_EMAIL` / `DEFAULT_USER_PASSWORD`).
 
 - Engine paths — `PHOTO_RESIZER_EXE`, `PHOTO_CONVERTER_EXE` and
   `PHOTO_ENHANCER_EXE` must point to the built CLI executables in `bin/`
@@ -112,6 +118,28 @@ Frontend (`frontend/`): `npm run dev`, `npm run build`, `npm start`, `npm run li
 
 ## Security notes
 
+- Hardened response headers on every response (`SECURITY_HEADERS`): CSP
+  (`CONTENT_SECURITY_POLICY`), HSTS over TLS (`HSTS_MAX_AGE_SECONDS`), `nosniff`,
+  frame-deny, referrer and permissions policy.
+- Passwords are scrypt-hashed with a per-user salt. Registration enforces
+  `PASSWORD_MIN_LENGTH` / `PASSWORD_MAX_LENGTH`, an optional letter+digit rule
+  (`PASSWORD_REQUIRE_COMPLEXITY`) and a common-password/denylist check
+  (`PASSWORD_BLOCKLIST`). Login compares in constant time and never reveals
+  whether an email exists.
+- Refresh tokens are rotated on every use and stored only as hashes; presenting
+  a valid-but-already-rotated token (`AUTH_REFRESH_REUSE_REVOKE`) revokes every
+  session for that user. Legacy sessions remain until they expire.
+- Cookies are `httpOnly`, `SameSite=Lax` and `Secure` under TLS; token-based
+  native clients use `X-Access-Token` instead. State-changing cookie requests
+  are rejected unless they carry an allowed `Origin`/`Referer`
+  (`CSRF_PROTECTION`).
+- Requests are hardened: prototype-polluting keys are dropped, unsupported
+  content types rejected, URL and JSON body sizes capped (`MAX_URL_LENGTH`,
+  `JSON_BODY_LIMIT`), and plaintext HTTP refused when `REQUIRE_HTTPS=true`.
+  Every request is logged with a request id (`REQUEST_LOGGING`).
+- Startup runs a security audit and, in strict mode (`SECURITY_STRICT`, default
+  in production), refuses to boot on weak configuration such as a missing
+  `JWT_SECRET` or the unchanged demo password.
 - Only the registered EXE paths (and the auto-detected FFmpeg binaries) can be
   spawned; arguments are passed as an
   array (no shell), with timeout and process-tree kill on failure.

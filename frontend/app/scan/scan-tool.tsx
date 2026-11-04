@@ -166,7 +166,7 @@ function ScanPageCard({
               e.stopPropagation();
               onMove(-1);
             }}
-            className="flex h-8 w-8 items-center justify-center rounded text-on-surface-variant hover:bg-surface-container-high disabled:opacity-30"
+            className="flex h-10 w-10 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:opacity-30"
           >
             <ArrowUp className="h-3.5 w-3.5" />
           </button>
@@ -178,7 +178,7 @@ function ScanPageCard({
               e.stopPropagation();
               onMove(1);
             }}
-            className="flex h-8 w-8 items-center justify-center rounded text-on-surface-variant hover:bg-surface-container-high disabled:opacity-30"
+            className="flex h-10 w-10 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:opacity-30"
           >
             <ArrowDown className="h-3.5 w-3.5" />
           </button>
@@ -562,6 +562,42 @@ export function ScanTool() {
             <div className="sticky top-24 flex flex-col gap-6 rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-5 shadow-sm sm:p-6">
               <div className="border-b border-outline-variant/10 pb-4">
                 <h2 className="font-display text-xl font-medium">Scan Settings</h2>
+              </div>
+
+              {/* AI Shadow Remover & Clean-Scan Quick Action */}
+              <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm">✨</span>
+                    <span className="text-xs font-semibold text-foreground">AI Shadow Remover &amp; Paper Whitener</span>
+                  </div>
+                  <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/30">
+                    Neural Scan
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Eliminates hand &amp; smartphone camera shadows, whitens yellowed paper, and flattens paper creases.
+                </p>
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={mode === "magic" ? "default" : "outline"}
+                    className={cn("h-8 text-xs flex-1", mode === "magic" ? "bg-blue-600 text-white hover:bg-blue-700" : "")}
+                    onClick={() => setMode("magic")}
+                  >
+                    Shadow Removal
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={mode === "removebg" ? "default" : "outline"}
+                    className={cn("h-8 text-xs flex-1", mode === "removebg" ? "bg-blue-600 text-white hover:bg-blue-700" : "")}
+                    onClick={() => setMode("removebg")}
+                  >
+                    Clean White Paper
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-3">

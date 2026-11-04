@@ -31,6 +31,7 @@ export class SqliteJobStore implements JobStore {
       CREATE TABLE IF NOT EXISTS jobs (
         id             TEXT PRIMARY KEY,
         operation      TEXT    NOT NULL,
+        user_id        TEXT,
         input_filename TEXT    NOT NULL,
         input_size     INTEGER NOT NULL,
         input_format   TEXT    NOT NULL,
@@ -45,20 +46,28 @@ export class SqliteJobStore implements JobStore {
         processed_at   INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at);
+      CREATE INDEX IF NOT EXISTS idx_jobs_user_created ON jobs(user_id, created_at);
     `);
+
+    // Migration for job databases created before accounts were billed.
+    const columns = this.conn.prepare("PRAGMA table_info(jobs)").all() as unknown as { name: string }[];
+    if (!columns.some((c) => c.name === "user_id")) {
+      this.conn.exec("ALTER TABLE jobs ADD COLUMN user_id TEXT");
+    }
   }
 
   async create(record: JobRecord): Promise<void> {
     this.conn
       .prepare(
-        `INSERT INTO jobs (id, operation, input_filename, input_size, input_format,
+        `INSERT INTO jobs (id, operation, user_id, input_filename, input_size, input_format,
                            output_filename, output_size, output_format, state, stage,
                            error, created_at, updated_at, processed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
         record.operation,
+        record.userId,
         record.inputFilename,
         record.inputSize,
         record.inputFormat,
@@ -102,6 +111,45 @@ export class SqliteJobStore implements JobStore {
     for (const id of ids) stmt.run(id);
   }
 
+  async list(limit: number): Promise<JobRecord[]> {
+    const rows = this.conn
+      .prepare("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?")
+      .all(Math.max(0, Math.trunc(limit))) as unknown as Record<string, unknown>[];
+    return rows.map(mapRow);
+  }
+
+  async listSince(sinceMs: number, limit: number): Promise<JobRecord[]> {
+    const rows = this.conn
+      .prepare("SELECT * FROM jobs WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?")
+      .all(sinceMs, Math.max(0, Math.trunc(limit))) as unknown as Record<string, unknown>[];
+    return rows.map(mapRow);
+  }
+
+  async listByUser(userId: string, limit: number, sinceMs?: number): Promise<JobRecord[]> {
+    const capped = Math.max(0, Math.trunc(limit));
+    const rows = (
+      sinceMs == null
+        ? this.conn
+            .prepare("SELECT * FROM jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?")
+            .all(userId, capped)
+        : this.conn
+            .prepare(
+              "SELECT * FROM jobs WHERE user_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT ?",
+            )
+            .all(userId, sinceMs, capped)
+    ) as unknown as Record<string, unknown>[];
+    return rows.map(mapRow);
+  }
+
+  async countByState(): Promise<Record<string, number>> {
+    const rows = this.conn
+      .prepare("SELECT state, COUNT(*) AS n FROM jobs GROUP BY state")
+      .all() as unknown as { state: string; n: number }[];
+    const counts: Record<string, number> = {};
+    for (const row of rows) counts[String(row.state)] = Number(row.n);
+    return counts;
+  }
+
   async sweepExpired(now: number): Promise<string[]> {
     const rows = this.conn
       .prepare(
@@ -120,6 +168,7 @@ export class SqliteJobStore implements JobStore {
 }
 
 const COLUMN_MAP: Record<string, string> = {
+  userId: "user_id",
   inputFilename: "input_filename",
   inputSize: "input_size",
   inputFormat: "input_format",
@@ -135,6 +184,7 @@ function mapRow(row: Record<string, unknown>): JobRecord {
   return {
     id: String(row.id),
     operation: row.operation as JobRecord["operation"],
+    userId: row.user_id == null ? null : String(row.user_id),
     inputFilename: String(row.input_filename),
     inputSize: Number(row.input_size),
     inputFormat: String(row.input_format),

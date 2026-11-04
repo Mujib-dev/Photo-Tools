@@ -137,20 +137,140 @@ export function VideoSettingsForm({ value, onChange, duration = 0 }: Props) {
       </div>
 
       {value.output !== "thumbnail" && (
-        <div className="space-y-3">
-          <SectionTitle>Trim</SectionTitle>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <SectionTitle>Trim &amp; Timeline</SectionTitle>
+            {hasDuration && (
+              <span className="font-mono text-xs text-primary font-semibold">
+                {clipLength.toFixed(1)}s ({formatClock(clipLength)})
+              </span>
+            )}
+          </div>
+
+          {hasDuration && (
+            <div className="space-y-3 rounded-xl border border-outline-variant/15 bg-muted/40 p-3.5">
+              {/* Timeline track visualizer */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between font-mono text-[11px] text-on-surface-variant">
+                  <span>Start: {formatClock(value.trimStart)}</span>
+                  <span>End: {formatClock(value.trimEnd > 0 ? Math.min(value.trimEnd, duration) : duration)}</span>
+                </div>
+                <div className="relative h-6 w-full rounded-lg bg-surface-container-high/80 overflow-hidden border border-outline-variant/30">
+                  {/* Selected slice highlight */}
+                  <div
+                    className="absolute inset-y-0 bg-primary/25 border-x-2 border-primary transition-all"
+                    style={{
+                      left: `${Math.min(100, Math.max(0, (value.trimStart / duration) * 100))}%`,
+                      width: `${Math.min(
+                        100,
+                        Math.max(
+                          0,
+                          (((value.trimEnd > 0 ? Math.min(value.trimEnd, duration) : duration) - value.trimStart) /
+                            duration) *
+                            100,
+                        ),
+                      )}%`,
+                    }}
+                  />
+                  {/* Center time marker label */}
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <span className="font-mono text-[10px] font-semibold text-foreground/80">
+                      Total: {formatClock(duration)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Start scrubber slider */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-on-surface-variant font-medium">
+                  <span>Scrub Start: {value.trimStart.toFixed(1)}s</span>
+                  <span className="font-mono text-[11px]">{formatClock(value.trimStart)}</span>
+                </div>
+                <Slider
+                  value={[value.trimStart]}
+                  min={0}
+                  max={Math.max(0, (value.trimEnd > 0 ? Math.min(value.trimEnd, duration) : duration) - 0.5)}
+                  step={0.1}
+                  onValueChange={([v]) => set("trimStart", Math.round(v * 10) / 10)}
+                />
+              </div>
+
+              {/* End scrubber slider */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-on-surface-variant font-medium">
+                  <span>
+                    Scrub End:{" "}
+                    {(value.trimEnd > 0 ? Math.min(value.trimEnd, duration) : duration).toFixed(1)}s
+                  </span>
+                  <span className="font-mono text-[11px]">
+                    {formatClock(value.trimEnd > 0 ? Math.min(value.trimEnd, duration) : duration)}
+                  </span>
+                </div>
+                <Slider
+                  value={[value.trimEnd > 0 ? Math.min(value.trimEnd, duration) : duration]}
+                  min={Math.min(duration, value.trimStart + 0.5)}
+                  max={duration}
+                  step={0.1}
+                  onValueChange={([v]) => {
+                    const rounded = Math.round(v * 10) / 10;
+                    set("trimEnd", rounded >= duration ? 0 : rounded);
+                  }}
+                />
+              </div>
+
+              {/* Quick trim presets */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => onChange({ ...value, trimStart: 0, trimEnd: 0 })}
+                  className="rounded-md border border-outline-variant/30 bg-background px-2 py-1 font-mono text-[11px] text-on-surface-variant transition-colors hover:border-primary hover:text-primary"
+                >
+                  Full Video
+                </button>
+                {duration >= 15 && (
+                  <button
+                    type="button"
+                    onClick={() => onChange({ ...value, trimStart: 0, trimEnd: 15 })}
+                    className="rounded-md border border-outline-variant/30 bg-background px-2 py-1 font-mono text-[11px] text-on-surface-variant transition-colors hover:border-primary hover:text-primary"
+                  >
+                    First 15s
+                  </button>
+                )}
+                {duration >= 30 && (
+                  <button
+                    type="button"
+                    onClick={() => onChange({ ...value, trimStart: 0, trimEnd: 30 })}
+                    className="rounded-md border border-outline-variant/30 bg-background px-2 py-1 font-mono text-[11px] text-on-surface-variant transition-colors hover:border-primary hover:text-primary"
+                  >
+                    First 30s
+                  </button>
+                )}
+                {duration >= 60 && (
+                  <button
+                    type="button"
+                    onClick={() => onChange({ ...value, trimStart: 0, trimEnd: 60 })}
+                    className="rounded-md border border-outline-variant/30 bg-background px-2 py-1 font-mono text-[11px] text-on-surface-variant transition-colors hover:border-primary hover:text-primary"
+                  >
+                    First 60s
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <NumberField
-              label="Start"
+              label="Start Time"
               value={value.trimStart}
               onChange={(v) => set("trimStart", v)}
               suffix="s"
             />
             <NumberField
-              label="End"
+              label="End Time"
               value={value.trimEnd}
               onChange={(v) => set("trimEnd", v)}
-              placeholder="full"
+              placeholder={hasDuration ? `${duration.toFixed(1)} (full)` : "full"}
               suffix="s"
             />
           </div>
@@ -405,10 +525,32 @@ export function VideoSettingsForm({ value, onChange, duration = 0 }: Props) {
       )}
 
       {value.output === "thumbnail" && (
-        <div className="space-y-3">
-          <SectionTitle>Thumbnail</SectionTitle>
+        <div className="space-y-4">
+          <SectionTitle>Thumbnail Frame</SectionTitle>
+          {hasDuration && (
+            <div className="space-y-2 rounded-xl border border-outline-variant/15 bg-muted/40 p-3.5">
+              <div className="flex justify-between text-xs text-on-surface-variant font-medium">
+                <span>Timeline Scrubber</span>
+                <span className="font-mono text-primary font-semibold">
+                  {formatClock(value.frameTime)} ({value.frameTime.toFixed(1)}s)
+                </span>
+              </div>
+              <Slider
+                value={[value.frameTime]}
+                min={0}
+                max={duration}
+                step={0.1}
+                onValueChange={([v]) => set("frameTime", Math.round(v * 10) / 10)}
+              />
+              <div className="flex justify-between font-mono text-[10px] text-on-surface-variant">
+                <span>0:00</span>
+                <span>{formatClock(duration / 2)}</span>
+                <span>{formatClock(duration)}</span>
+              </div>
+            </div>
+          )}
           <NumberField
-            label="Capture at"
+            label="Capture Timestamp"
             value={value.frameTime}
             onChange={(v) => set("frameTime", v)}
             suffix="s"

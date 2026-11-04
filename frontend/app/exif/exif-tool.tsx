@@ -3,6 +3,7 @@
 import * as React from "react";
 import {
   AlertTriangle,
+  Copy,
   Download,
   Eraser,
   FileSearch,
@@ -11,6 +12,7 @@ import {
   MapPin,
   Plus,
   ShieldCheck,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -22,6 +24,7 @@ import { ZoomControls } from "@/components/zoom-controls";
 import { downloadBlob } from "@/lib/screenshot";
 import { baseName, loadImageElement, uid } from "@/lib/image-edit";
 import { readImageMeta, stripMetadata, type ImageMeta } from "@/lib/exif";
+import { generateSceneCaption, type SceneAnalysis } from "@/lib/scene-captioner";
 import { createZip } from "@/lib/zip";
 import { formatBytes, formatPixels } from "@/lib/format";
 import { useZoomPan } from "@/lib/use-zoom-pan";
@@ -42,6 +45,7 @@ interface ExifItem {
   height: number;
   state: "loading" | "ready" | "error";
   meta: ImageMeta | null;
+  caption?: SceneAnalysis | null;
   result: StripResult | null;
   status: "ready" | "done" | "downloaded";
 }
@@ -93,10 +97,12 @@ export function ExifTool() {
       void loadImageElement(item.url)
         .then(async (img) => {
           const meta = await readImageMeta(item.file, img.naturalWidth, img.naturalHeight);
+          const caption = generateSceneCaption(img);
           patchItem(item.key, {
             width: img.naturalWidth,
             height: img.naturalHeight,
             meta,
+            caption,
             state: "ready",
           });
         })
@@ -352,6 +358,83 @@ export function ExifTool() {
                         No EXIF metadata found in this image.
                       </p>
                     )}
+
+                    {/* AI Vision Scene Captioner & Alt-Text Generator */}
+                    {selected.caption && (
+                      <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <Sparkles className="h-4 w-4 text-blue-500" />
+                            <span className="font-display text-sm font-semibold text-foreground">
+                              AI Scene Captioner &amp; Alt-Text
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/30 uppercase">
+                            {selected.caption.category}
+                          </span>
+                        </div>
+
+                        {/* Accessibility Alt-Text */}
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground font-medium">Accessibility Alt-Text:</span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 text-[11px] gap-1 px-2"
+                              onClick={() => {
+                                void navigator.clipboard.writeText(selected.caption?.altText || "");
+                                toast.success("Alt-text copied to clipboard!");
+                              }}
+                            >
+                              <Copy className="h-3 w-3" />
+                              Copy
+                            </Button>
+                          </div>
+                          <p className="rounded-lg bg-background/80 p-2 text-xs font-mono border border-border/50 text-foreground">
+                            {selected.caption.altText}
+                          </p>
+                        </div>
+
+                        {/* SEO Headline & Description */}
+                        <div className="space-y-1">
+                          <span className="text-[11px] text-muted-foreground font-medium">SEO Headline:</span>
+                          <p className="font-semibold text-xs text-foreground">{selected.caption.headline}</p>
+                          <p className="text-xs text-muted-foreground">{selected.caption.description}</p>
+                        </div>
+
+                        {/* Smart Tags */}
+                        <div className="pt-1">
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
+                            <span>Suggested SEO Hashtags:</span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-5 text-[10px] gap-1 px-1.5"
+                              onClick={() => {
+                                void navigator.clipboard.writeText(selected.caption?.tags.join(" ") || "");
+                                toast.success("Hashtags copied!");
+                              }}
+                            >
+                              <Copy className="h-2.5 w-2.5" />
+                              Copy All
+                            </Button>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {selected.caption.tags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -431,7 +514,7 @@ export function ExifTool() {
                         size="icon"
                         variant="ghost"
                         aria-label={`Remove ${item.file.name}`}
-                        className="h-8 w-8"
+                        className="h-10 w-10"
                         onClick={(e) => {
                           e.stopPropagation();
                           removeItem(item.key);

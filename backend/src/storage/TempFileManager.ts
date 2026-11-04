@@ -45,6 +45,28 @@ export async function saveInputFile(dirs: JobDirectories, buffer: Buffer, ext: s
   return filePath;
 }
 
+/**
+ * Move an already-staged upload (e.g. one multer wrote to disk) into the job's
+ * input directory under an internally generated name. Falls back to a copy
+ * when the source and destination live on different volumes.
+ */
+export async function moveInputFile(
+  dirs: JobDirectories,
+  sourcePath: string,
+  ext: string,
+): Promise<string> {
+  const safeExt = ext.replace(/[^a-z0-9]/gi, "").toLowerCase().slice(0, 5) || "bin";
+  const name = `${crypto.randomUUID()}.${safeExt}`;
+  const filePath = path.join(dirs.inputDir, name);
+  try {
+    await fs.rename(sourcePath, filePath);
+  } catch {
+    await fs.copyFile(sourcePath, filePath);
+    await fs.rm(sourcePath, { force: true });
+  }
+  return filePath;
+}
+
 export async function writeLog(dirs: JobDirectories, filename: string, content: string): Promise<void> {
   try {
     await fs.writeFile(path.join(dirs.logsDir, filename), content, "utf8");

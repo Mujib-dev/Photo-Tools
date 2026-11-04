@@ -107,3 +107,30 @@ export function verifyRefreshToken(token: string): RefreshClaims | null {
   if (typeof claims.iat !== "number" || typeof claims.exp !== "number") return null;
   return claims as unknown as RefreshClaims;
 }
+
+export interface SudoClaims {
+  sub: string;
+  typ: "sudo";
+  iat: number;
+  exp: number;
+}
+
+/** Mint a short-lived sudo authorization token for high-risk administrator actions. */
+export function signSudoToken(
+  userId: string,
+  ttlMs = 15 * 60 * 1000,
+): { token: string; expiresAt: number } {
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + Math.floor(ttlMs / 1000);
+  const token = sign({ sub: userId, typ: "sudo", iat: now, exp });
+  return { token, expiresAt: exp * 1000 };
+}
+
+/** Verify a sudo token's cryptographic signature, type, expiry and actor identity. */
+export function verifySudoToken(token: string, expectedUserId: string): boolean {
+  if (!token || typeof token !== "string") return false;
+  const claims = verifySignature(token);
+  if (!claims || claims.typ !== "sudo" || isExpired(claims, Date.now())) return false;
+  if (claims.sub !== expectedUserId) return false;
+  return true;
+}

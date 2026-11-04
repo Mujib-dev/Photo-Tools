@@ -1,4 +1,5 @@
 import type {
+  AudioSettings,
   CompressSettings,
   ConvertSettings,
   EnhanceSettings,
@@ -9,23 +10,20 @@ import type {
   RemoveBgSettings,
   ResizeSettings,
   ScanSettings,
+  OcrAnalysisResult,
+  OcrLanguage,
+  OcrSettings,
   SubmitResponse,
+  UrlDownloadAnalysis,
+  UrlDownloadSettings,
   VideoSettings,
   WatermarkSettings,
 } from "./types";
+import { errorFrom, request as authRequest } from "./auth";
 
 async function request(path: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(path, init);
-  if (!res.ok) {
-    let message = "Something went wrong. Please try again.";
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) message = body.error;
-    } catch {
-      // ignore non-JSON error bodies
-    }
-    throw new Error(message);
-  }
+  const res = await authRequest(path, init);
+  if (!res.ok) throw await errorFrom(res);
   return res;
 }
 
@@ -38,7 +36,9 @@ async function submit(
     | RemoveBgSettings
     | CompressSettings
     | WatermarkSettings
-    | VideoSettings,
+    | VideoSettings
+    | AudioSettings
+    | OcrSettings,
   path: string,
 ): Promise<SubmitResponse> {
   const fd = new FormData();
@@ -68,12 +68,47 @@ export function submitCompress(file: File, settings: CompressSettings): Promise<
   return submit(file, settings, "/api/backend/compress");
 }
 
-export function submitWatermark(file: File, settings: WatermarkSettings): Promise<SubmitResponse> {
-  return submit(file, settings, "/api/backend/watermark");
+export async function submitWatermark(
+  file: File,
+  settings: WatermarkSettings,
+  watermarkImage?: File | null,
+): Promise<SubmitResponse> {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (watermarkImage) {
+    fd.append("watermark", watermarkImage);
+  }
+  fd.append("settings", JSON.stringify(settings));
+  const res = await request("/api/backend/watermark", { method: "POST", body: fd });
+  return (await res.json()) as SubmitResponse;
+}
+
+export function submitAudio(file: File, settings: AudioSettings): Promise<SubmitResponse> {
+  return submit(file, settings, "/api/backend/audio");
 }
 
 export function submitVideo(file: File, settings: VideoSettings): Promise<SubmitResponse> {
   return submit(file, settings, "/api/backend/video");
+}
+
+/** Inspect a media URL and return its quality/format options. */
+export async function analyzeUrlDownload(url: string): Promise<UrlDownloadAnalysis> {
+  const res = await request("/api/backend/url-download/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  return (await res.json()) as UrlDownloadAnalysis;
+}
+
+/** Queue a URL fetch/convert job. */
+export async function submitUrlDownload(settings: UrlDownloadSettings): Promise<SubmitResponse> {
+  const res = await request("/api/backend/url-download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  return (await res.json()) as SubmitResponse;
 }
 
 export async function getJob(id: string): Promise<JobRecord> {
@@ -120,6 +155,17 @@ export function subscribeJob(
   };
 }
 
+/** The signed-in account's recent jobs, newest first (My Files). */
+export async function listJobs(limit = 100): Promise<JobRecord[]> {
+  const res = await request(`/api/backend/jobs?limit=${limit}`);
+  const body = (await res.json()) as { jobs: JobRecord[] };
+  return body.jobs;
+}
+
+export async function deleteJob(id: string): Promise<void> {
+  await request(`/api/backend/jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 export function downloadUrl(id: string): string {
   return `/api/backend/download/${encodeURIComponent(id)}`;
 }
@@ -153,11 +199,23 @@ export async function submitPdf(
   files: File[],
   op: PdfOp,
   plan?: PdfEditPlan,
+  extraSettings?: {
+    userPassword?: string;
+    ownerPassword?: string;
+    permissions?: {
+      print?: boolean;
+      copy?: boolean;
+      edit?: boolean;
+      annotate?: boolean;
+    };
+    password?: string;
+  },
 ): Promise<SubmitResponse> {
   const fd = new FormData();
   for (const file of files) fd.append("files", file);
   // For "edit" the first file must be the PDF; overlay images follow it.
-  fd.append("settings", JSON.stringify(plan ? { op, plan } : { op }));
+  const payload = plan ? { op, plan, ...extraSettings } : { op, ...extraSettings };
+  fd.append("settings", JSON.stringify(payload));
   const res = await request("/api/backend/pdf", { method: "POST", body: fd });
   return (await res.json()) as SubmitResponse;
 }
@@ -203,4 +261,46 @@ export async function submitContact(data: {
     body: JSON.stringify(data),
   });
   return (await res.json()) as ContactSubmitResponse;
+}
+
+export async function getOcrLanguages(): Promise<OcrLanguage[]> {
+  const res = await request("/api/backend/ocr/languages");
+  return (await res.json()) as OcrLanguage[];
+}
+
+export async function analyzeOcr(file: File, language?: string): Promise<OcrAnalysisResult> {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (language) fd.append("language", language);
+  const res = await request("/api/backend/ocr/analyze", { method: "POST", body: fd });
+  return (await res.json()) as OcrAnalysisResult;
+}
+
+export function submitOcr(file: File, settings: OcrSettings): Promise<SubmitResponse> {
+  return submit(file, settings, "/api/backend/ocr");
+}
+
+export interface BatchJobResult {
+  /** Position in the batch, 0-based. */
+  index: number;
+  filename: string;
+  /** The queued job id, or null when the file could not be queued. */
+  jobId: string | null;
+  status: string;
+  /** Why the file was rejected, when it was. */
+  error: string | null;
+}
+
+export async function submitBatch(
+  operation: string,
+  files: File[],
+  settings: unknown,
+  renameTemplate?: string,
+): Promise<{ jobIds: string[]; jobs: BatchJobResult[] }> {
+  const fd = new FormData();
+  for (const file of files) fd.append("files", file);
+  fd.append("settings", JSON.stringify(settings ?? {}));
+  if (renameTemplate) fd.append("renameTemplate", renameTemplate);
+  const res = await request(`/api/backend/batch/${operation}`, { method: "POST", body: fd });
+  return (await res.json()) as { jobIds: string[]; jobs: BatchJobResult[] };
 }
